@@ -1,0 +1,32 @@
+{
+    "serve": {
+        "port": 32361,
+        "tls": true,
+        "cors_origin": ["*"],
+        "cache": false,
+        "proto": {
+            "rest": false,
+            "grpc": true,
+            "graphql": false
+        }
+    },
+    "store": {
+        "name": "mem",
+        "endpoint": "",
+        "dbuser": "",
+        "dbpassword": "",
+        "dbpath": "./data"
+    },
+    "security": {
+        "master_password": false,
+        "postq_creds": false,
+        "locker_name_hash": false,
+        "tls_cert_path": "./tls/server.pem",
+        "tls_key_path": "./tls/server.key"
+    },
+    "backup": {
+        "interval": 73200,
+        "cloud_endpoint": ""
+    },
+    "test": true
+}
