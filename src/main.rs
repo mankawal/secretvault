@@ -1,19 +1,21 @@
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
-use std::{thread, time};
-use serde::{Deserialize};
-use serde_json;
+use std::{thread, time, sync::Arc};
 use tonic::{Request, Response, Status,
     transport::{
         // For client
         Certificate, Channel, ClientTlsConfig,
         // For server
-        Identity, Server, ServerTlsConfig,
-        server::{TcpConnectInfo, TlsConnectInfo}
+        Identity, Server, ServerTlsConfig
     }
 };
-use rocksdb;
 
+mod prelude;
+mod config;
+mod store_factory;
+mod memvault;
+mod rocksvault;
+
+use crate::prelude::KVStore;
 use secret_vault::{
     GetConfigRequest, GetConfigResponse,
     CreateLockerRequest, CreateLockerResponse,
@@ -26,172 +28,69 @@ use secret_vault::{
     secret_vault_client::SecretVaultClient,
 };
 
+pub mod secret_vault {
+    tonic::include_proto!("secret_vault");
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>>
 {
-    let config = read_and_parse_config()?;
+    let config = config::read_and_parse_config()?;
     println!("config: {:?}", config);
-
-    let addr = std::format!("0.0.0.0:{}", &config.serve.port);
-    let service_addr = addr.parse().unwrap();
-    let service = SecretVaultService::new(&config).unwrap();
-    println!("service_addr: {:?}", &service_addr);
 
     if config.test {
         // test_vault_locker();
         test_client_workflow(&config);
     }
 
-    if config.serve.tls {
-        let cert = std::fs::read_to_string(config.security.tls_cert_path)?;
-        let key = std::fs::read_to_string(config.security.tls_key_path)?;
-        let identity = Identity::from_pem(cert, key);
+    let mut svc_handles = Vec::new();
+    let kvstore = store_factory::create_store(&config).unwrap();
+    let kvstore_grpc = kvstore.clone();
+    if config.serve.proto.grpc != 0
+    {
+        let addr = std::format!("0.0.0.0:{}", &config.serve.proto.grpc);
+        let service_addr = addr.parse()?;
+        let service = SecretVaultService::new(&config, kvstore_grpc)?;
+        println!("service_addr: {:?}", &service_addr);
 
-        Server::builder()
-            .tls_config(ServerTlsConfig::new().identity(identity))?
-            .add_service(SecretVaultServer::new(service))
-            .serve(service_addr)
-            .await?;
-    } else {
-    Server::builder()
-        .add_service(SecretVaultServer::new(service))
-        .serve(service_addr)
-        .await?;
+        if config.serve.tls {
+            let cert = std::fs::read_to_string(config.security.tls_cert_path)?;
+            let key = std::fs::read_to_string(config.security.tls_key_path)?;
+            let identity = Identity::from_pem(cert, key);
+
+            svc_handles.push(Server::builder()
+                .tls_config(ServerTlsConfig::new().identity(identity))?
+                .add_service(SecretVaultServer::new(service))
+                .serve(service_addr));
+        } else {
+            svc_handles.push(Server::builder()
+                .add_service(SecretVaultServer::new(service))
+                .serve(service_addr));
+        }
+    }
+
+    for svc in svc_handles {
+        svc.await?;
     }
     Ok(())
 }
 
-// --- Config ----
+// --- GRPC service implementation ---
 
-#[derive(Deserialize, Debug)]
-struct ProtoConfig
-{
-    rest: bool,
-    grpc: bool,
-    graphql: bool,
-}
-
-#[derive(Deserialize, Debug)]
-struct EndpointConfig
-{
-    port: u32,
-    tls: bool,
-    cors_origin: Vec<String>,
-    cache: bool,
-    proto : ProtoConfig,
-}
-
-#[derive(Deserialize, Debug)]
-pub struct StoreConfig
-{
-    name: String,
-    endpoint: String,
-    dbuser: String,
-    dbpassword: String,
-    dbpath: String,
-}
-
-#[derive(Deserialize, Debug)]
-struct SecurityConfig
-{
-    master_password: bool,
-    postq_creds: bool,
-    locker_name_hash: bool,
-
-    tls_cert_path: String,
-    tls_key_path: String,
-}
-
-#[derive(Deserialize, Debug)]
-struct BackupConfig
-{
-    interval: u64,
-    cloud_endpoint: String, 
-}
-
-#[derive(Deserialize, Debug)]
-struct ServiceConfig
-{
-    serve: EndpointConfig,
-    store: StoreConfig,
-    security: SecurityConfig,
-    backup: BackupConfig,
-    test: bool
-}
-
-fn get_config_str() -> std::io::Result<String>
-{
-    let mut configfile =
-        std::path::PathBuf::from("./config.json");
-    match std::fs::read_to_string(&configfile) {
-        Ok(config_str) => Ok(config_str),
-        Err(e) => Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                std::format!("failed to read config file {}, err: {}",
-                             configfile.display(), e))),
-    }
-}
-
-fn read_and_parse_config() -> std::io::Result<ServiceConfig>
-{
-    match get_config_str() {
-        Ok(config_str) => {
-            match serde_json::from_str(&config_str) {
-                Ok(config) => Ok(config),
-                Err(e) => Err(std::io::Error::new(
-                        std::io::ErrorKind::Other, std::format!(
-                            "parsing json file failed, err: {}", e)))
-            }
-        },
-        Err(e) => Err(e),
-    }
-}
-
-// --- Service implementation ---
-
-// [Future] Plugin entry function.
-// pub fn build_kvstore() -> std::io::Result<Arc<dyn KVStore + Send + Sync>>;
-
-pub trait KVStore
-{
-    fn create_locker(&self, locker: String) -> std::io::Result<()>;
-    fn delete_locker(&self, locker: &String) -> std::io::Result<()>;
-
-    fn add_kv(&self, locker: &String, k: String, v: String)
-        -> std::io::Result<()>;
-    fn get_kv(&self, locker: &String, k: &String) -> std::io::Result<String>;
-    fn update_kv(&self, locker: &String, k: &String, v: String)
-        -> std::io::Result<()>;
-    fn remove_kv(&self, locker: &String, k: &String) -> std::io::Result<()>;
-}
-
-// --- Service implementation ---
-
-pub struct SecretVaultService
+struct SecretVaultService
 {
     pub lockers: Arc<dyn KVStore + Send + Sync>,
 }
 
 impl SecretVaultService
 {
-    fn new(cfg: &ServiceConfig) -> std::io::Result<SecretVaultService>
+    pub fn new(_cfg: &config::ServiceConfig,
+               store: Arc<dyn KVStore + Send + Sync>)
+        -> std::io::Result<SecretVaultService>
     {
-        let store = 
-            match cfg.store.name.as_str() {
-                "rocks" => build_kvstore_rocks(&cfg.store),
-                "mem" => build_kvstore_mem(&cfg.store),
-                unsupported_store_name => {
-                    panic!("Unsupported store name {}",
-                           unsupported_store_name);
-                }
-            };
-        match store {
-            Ok(store) =>
-                Ok(SecretVaultService {
-                    lockers: store,
-                }),
-            Err(e) => Err(e),
-        }
+        Ok(SecretVaultService {
+            lockers: store,
+        })
     }
 }
 
@@ -201,7 +100,7 @@ impl SecretVault for SecretVaultService
     async fn get_config(&self, _req: Request<GetConfigRequest>) ->
         Result<Response<GetConfigResponse>, Status>
     {
-        match get_config_str() {
+        match config::get_config_str() {
             // Insertion succeeded
             Ok(config_str) =>  Ok(Response::new(GetConfigResponse{
                 config: config_str,
@@ -290,383 +189,18 @@ impl SecretVault for SecretVaultService
     }
 }
 
-pub mod secret_vault {
-    tonic::include_proto!("secret_vault");
-}
-
-// -- Internal data-structures
-
-pub fn build_kvstore_mem(_cfg: &StoreConfig)
-    -> std::io::Result<Arc<dyn KVStore + Send + Sync>>
-{
-    let memvault = MemVault::new();
-    Ok(Arc::new(memvault))
-}
-
-#[derive(Debug, Default)]
-pub struct MemVault 
-{
-    map: Arc<RwLock<HashMap<String, MemLocker>>>
-}
-
-impl MemVault
-{
-    pub fn new() -> MemVault 
-    {
-        MemVault{ map: Arc::new(RwLock::new(HashMap::new())) }
-    }
-
-    // TODO: Implement as Debug Display trait.
-    pub fn show(&self)
-    {
-        let map_locked = self.map.read().unwrap();
-        for (k,v) in map_locked.iter() {
-            println!("\n---- locker: {k} ----:\n");
-            v.show();
-        }
-    }
-}
-
-impl Clone for MemVault
-{
-    fn clone(&self) -> MemVault
-    {
-        MemVault{ map: self.map.clone() }
-    }
-
-}
-
-impl KVStore for MemVault
-{
-    fn create_locker(&self, locker: String) -> std::io::Result<()>
-    {
-        let mut map_locked = self.map.write().unwrap();
-        match map_locked.insert(locker, MemLocker::new()) {
-            Some(_) => Err(std::io::Error::new(
-                std::io::ErrorKind::AlreadyExists,
-                "Duplicate locker name")),
-            None => Ok(()),
-        }
-    }
-
-    fn delete_locker(&self, locker: &String) -> std::io::Result<()>
-    {
-        let mut map_locked = self.map.write().unwrap();
-        match map_locked.remove(locker) {
-            Some(_) => Ok(()),
-            None => Err(std::io::Error::new(
-                    std::io::ErrorKind::NotFound,
-                    "Locker not found")),
-        }
-    }
-
-    fn add_kv(&self, locker: &String,
-              k: String, v: String) -> std::io::Result<()>
-    {
-        let map_locked = self.map.read().unwrap();
-        match map_locked.get(locker) {
-            Some(locker) => {
-                match locker.add(k, v) {
-                    true => Ok(()),
-                    false => Err(std::io::Error::new(
-                            std::io::ErrorKind::AlreadyExists,
-                            "Duplicate key")),
-                }
-            },
-            None => Err(std::io::Error::new(
-                    std::io::ErrorKind::NotFound,
-                    "Locker not found")),
-        }
-    }
-    fn update_kv(&self, locker: &String,
-              k: &String, v: String) -> std::io::Result<()>
-    {
-        let map_locked = self.map.read().unwrap();
-        match map_locked.get(locker) {
-            Some(locker) => {
-                match locker.update(k, v) {
-                    true => Ok(()),
-                    false => Err(std::io::Error::new(
-                            std::io::ErrorKind::NotFound,
-                            std::format!("Key {} not found", &k)))
-                }
-            },
-            None => Err(std::io::Error::new(
-                    std::io::ErrorKind::NotFound,
-                    "Locker not found")),
-        }
-    }
-    fn remove_kv(&self, locker: &String, k: &String) -> std::io::Result<()>
-    {
-        let map_locked = self.map.read().unwrap();
-        match map_locked.get(locker) {
-            Some(locker) => {
-                match locker.del(k) {
-                    true => Ok(()),
-                    false => Err(std::io::Error::new(
-                            std::io::ErrorKind::NotFound,
-                            "Key not found")),
-                }
-            },
-            None => Err(std::io::Error::new(
-                    std::io::ErrorKind::NotFound,
-                    "Locker not found")),
-        }
-    }
-
-    fn get_kv(&self, locker: &String, k: &String) -> std::io::Result<String>
-    {
-        let map_locked = self.map.read().unwrap();
-        match map_locked.get(locker) {
-            Some(locker) => {
-                match locker.get(k) {
-                    Some(value) => Ok(value),
-                    None => Err(std::io::Error::new(
-                            std::io::ErrorKind::NotFound,
-                            "Key not found")),
-                }
-            },
-            None => Err(std::io::Error::new(
-                    std::io::ErrorKind::NotFound,
-                    "Locker not found")),
-        }
-    }
-}
-
-#[derive(Debug, Default)]
-pub struct MemLocker
-{
-    map: Arc<RwLock<HashMap<String, String>>>
-}
-
-impl MemLocker
-{
-    pub fn new() -> MemLocker
-    {
-        MemLocker{ map: Arc::new(RwLock::new(HashMap::new())) }
-    }
-    
-    pub fn add(&self, key: String, val: String) -> bool
-    {
-        let mut map_locked = self.map.write().unwrap();
-        match map_locked.insert(key, val) {
-            Some(_) => false,
-            None => true,
-        }
-    }
-
-    pub fn del(&self, key: &String) -> bool
-    {
-        let mut map_locked = self.map.write().unwrap();
-        match map_locked.remove(key) {
-            Some(_) => true,
-            None => false,
-        }
-    }
-
-    pub fn get(&self, key: &String) -> Option<String>
-    {
-        let map_locked = self.map.read().unwrap();
-        match map_locked.get(key) {
-            Some(val) => Some(val.clone()),
-            None => None
-        }
-    }
-
-    pub fn update(&self, k: &String, v: String) -> bool
-    {
-        let mut map_locked = self.map.write().unwrap();
-        match map_locked.get_mut(k) {
-            Some(old_val) => {
-                *old_val = v;
-                true
-            },
-            None => false,
-        }
-    }
-
-    pub fn clone(&self) -> MemLocker
-    {
-        MemLocker{ map: self.map.clone() }
-    }
-
-    // TODO: Implement as Debug Display trait.
-    pub fn show(&self)
-    {
-        let map_locked = self.map.read().unwrap();
-        for (k,v) in map_locked.iter() {
-            println!("{k}: {v}");
-        }
-    }
-}
-
-// --- RocksDb based KVStore
-
-pub fn build_kvstore_rocks(cfg: &StoreConfig)
-    -> std::io::Result<Arc<dyn KVStore + Send + Sync>>
-{
-    Ok(Arc::new(RocksDbVault::new(&cfg.dbpath)))
-}
-
-#[derive(Clone)]
-pub struct RocksDbVault
-{
-    db: Arc<rocksdb::DB>
-}
-
-impl RocksDbVault
-{
-    fn new (dbpath: &str) -> Self
-    {
-        let mut options = rocksdb::Options::default();
-        options.create_if_missing(true);
-        
-        let cfs = 
-            rocksdb::DB::list_cf(&options, &dbpath)
-            .unwrap_or(vec![]);
-        RocksDbVault {
-            db: Arc::new(rocksdb::DB::open_cf(
-                        &options, &dbpath, cfs).unwrap())
-        }
-    }
-}
-
-impl KVStore for RocksDbVault
-{
-    fn create_locker(&self, locker: String) -> std::io::Result<()>
-    {
-        // TODO: Customizations for small db size, point lookups
-        // are available here for use as directed by the service config.
-        // Using the default for now.
-        let opts = rocksdb::Options::default();
-        match self.db.create_cf(&locker, &opts) {
-            Ok(()) => Ok(()),
-            Err(e) => Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidInput,
-                    std::format!("Rockdb CF creation {} failed: {}",
-                                 &locker, e))),
-        }
-    }
-    
-    fn delete_locker(&self, locker: &String) -> std::io::Result<()>
-    {
-        match self.db.drop_cf(&locker) {
-            Ok(()) => Ok(()),
-            Err(e) => Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidInput,
-                    std::format!("rocks-db column-family drop {} failed; {}",
-                                 locker, e))),
-        }
-    }
-
-    
-
-    fn add_kv(&self, locker: &String, k: String, v: String)
-        -> std::io::Result<()>
-    {
-        match self.db.cf_handle(locker) {
-            Some(cf) => {
-                match self.db.get_cf(&cf, &k) {
-                    Ok(Some(_)) => Err(std::io::Error::new(
-                            std::io::ErrorKind::AlreadyExists,
-                            std::format!(
-                                "Duplicate key, {}", &k))),
-                    Ok(None) => {
-                        self.update_kv(locker, &k, v)
-                    },
-                    Err(_e) => {
-                        self.update_kv(locker, &k, v)
-                    },
-                }
-            },
-            None => Err(std::io::Error::new(
-                    std::io::ErrorKind::NotFound,
-                    "Locker not found")),
-        }
-    }
-    fn update_kv(&self, locker: &String, k: &String, v: String)
-        -> std::io::Result<()>
-    {
-        match self.db.cf_handle(locker) {
-            Some(cf) => {
-                let mut opts = rocksdb::WriteOptions::default();
-                opts.set_sync(true);
-                match self.db.put_cf_opt(&cf, k, v, &opts) {
-                    Ok(()) => Ok(()),
-                    Err(e) => Err(std::io::Error::new(
-                            std::io::ErrorKind::InvalidInput,
-                            std::format!(
-                                "key, value insertion failed, {}", e))),
-                }
-            },
-            None => Err(std::io::Error::new(
-                    std::io::ErrorKind::NotFound,
-                    "Locker not found")),
-        }
-    }
-
-    fn remove_kv(&self, locker: &String, k: &String)
-        -> std::io::Result<()>
-    {
-        match self.db.cf_handle(locker) {
-            Some(cf) => {
-                let mut opts = rocksdb::WriteOptions::default();
-                opts.set_sync(true);
-                match self.db.delete_cf_opt(&cf, k, &opts) {
-                    Ok(()) => Ok(()),
-                    Err(e) => Err(std::io::Error::new(
-                            std::io::ErrorKind::InvalidInput,
-                            std::format!(
-                                "key, value insertion failed, {}", e))),
-                }
-            },
-            None => Err(std::io::Error::new(
-                    std::io::ErrorKind::NotFound,
-                    "Locker not found")),
-        }
-    }
-    fn get_kv(&self, locker: &String, k: &String) -> std::io::Result<String>
-    {
-        match self.db.cf_handle(locker) {
-            Some(cf) => {
-                match self.db.get_cf(&cf, k) {
-                    Ok(res_bytes) => {
-                        if let Some(bytes) = res_bytes {
-                            Ok(std::string::String::from_utf8(bytes).unwrap())
-                        } else {
-                            Err(std::io::Error::new(
-                                    std::io::ErrorKind::InvalidInput,
-                                    std::format!(
-                                        "key lookup returned null")))
-                        }
-                    },
-                    Err(e) => Err(std::io::Error::new(
-                            std::io::ErrorKind::InvalidInput,
-                            std::format!(
-                                "key lookup failed, {}", e))),
-                }
-            },
-            None => Err(std::io::Error::new(
-                    std::io::ErrorKind::NotFound,
-                    "Locker not found")),
-        }
-    }
-}
 
 // --- Test cases ---
-// TODO: Formalize these as test case.
-
 // Test Vault implementation
 fn _test_vault_locker()
 {
-    let vault = MemVault::new();
+    let vault = memvault::MemVault::new();
     let vault_r = vault.clone();
     let thd1 = thread::spawn(move || {
         for i in 1..9 {
             thread::sleep(time::Duration::from_secs(3));
 
-            println!("Read attempt {i}");
-            vault_r.show();
+            println!("Read attempt {i}\n{vault_r}");
         }
         println!("Reader thread done");
     });
@@ -696,9 +230,9 @@ fn _test_vault_locker()
 }
 
 // Test grpc service functionality
-fn test_client_workflow(cfg: &ServiceConfig)
+fn test_client_workflow(cfg: &config::ServiceConfig)
 {
-    let port: u32 = cfg.serve.port;
+    let port = cfg.serve.proto.grpc;
     let is_tls = cfg.serve.tls;
     let cert = std::fs::read_to_string("./tls/ca.pem").unwrap();
     let ca = Certificate::from_pem(cert);
@@ -726,7 +260,7 @@ fn test_client_workflow(cfg: &ServiceConfig)
             thread::sleep(time::Duration::from_secs(5));
 
             let channel = {
-                if (is_tls) {
+                if is_tls {
                     let addr = std::format!("https://0.0.0.0:{}", port);
                     Channel::from_shared(addr).unwrap()
                         .tls_config(tls_r).unwrap()
@@ -779,7 +313,7 @@ fn test_client_workflow(cfg: &ServiceConfig)
             thread::sleep(time::Duration::from_secs(5));
 
             let channel = {
-                if (is_tls) {
+                if is_tls {
                     let addr = std::format!("https://0.0.0.0:{}", port);
                     Channel::from_shared(addr).unwrap()
                         .tls_config(tls).unwrap()

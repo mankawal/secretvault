@@ -5,25 +5,20 @@ RUN apt-get update
 # Get Ubuntu packages
 RUN apt-get install -y \
     build-essential \
-    musl-tools \
-    curl clang
+    curl clang protobuf-compiler
 
 # Get Rust
 RUN USER=root curl https://sh.rustup.rs -sSf | bash -s -- -y
 
 RUN USER=root echo 'source $HOME/.cargo/env' >> $HOME/.bashrc
-# RUN USER=root source $HOME/.cargo/env
 RUN USER=root ls -l $HOME/.cargo/bin/cargo
 
 RUN USER=root $HOME/.cargo/bin/cargo new --bin secret_vault
 WORKDIR ./secret_vault
 COPY ./Cargo.toml ./Cargo.toml
-
-# RUN $HOME/.cargo/bin/rustup target add x86_64-unknown-linux-musl
-# RUN $HOME/.cargo/bin/cargo build --release --target=x86_64-unknown-linux-musl
-RUN $HOME/.cargo/bin/cargo build --release
-
 ADD . ./
+
+RUN $HOME/.cargo/bin/cargo build --release
 RUN rm ./target/release/deps/secret_vault*
 
 FROM ubuntu:latest
@@ -38,7 +33,6 @@ EXPOSE 32361
 ENV TZ=Etc/UTC \
     APP_USER=root
 
-# RUN groupadd $APP_USER && useradd -g $APP_USER $APP_USER
 RUN mkdir -p ${APP}
 RUN mkdir -p ${APP}/tls
 RUN mkdir -p /home/zulu/work/rust/secret_vault

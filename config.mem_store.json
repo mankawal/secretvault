@@ -10,7 +10,7 @@
         }
     },
     "store": {
-        "name": "rocks",
+        "name": "mem",
         "endpoint": "",
         "dbuser": "",
         "dbpassword": "",
