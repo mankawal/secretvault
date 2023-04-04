@@ -14,6 +14,7 @@ mod config;
 mod store_factory;
 mod memvault;
 mod rocksvault;
+mod svc_rest;
 
 use crate::prelude::KVStore;
 use secret_vault::{
@@ -67,6 +68,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>>
                 .add_service(SecretVaultServer::new(service))
                 .serve(service_addr));
         }
+    }
+    if config.serve.proto.rest != 0
+    {
+        let _thd = tokio::spawn(async move {
+            svc_rest::server(kvstore, config.serve.proto.rest,
+                             config.serve.tls).await;
+        });
     }
 
     for svc in svc_handles {
