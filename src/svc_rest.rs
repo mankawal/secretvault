@@ -3,7 +3,7 @@ use axum::{
     extract::State,
     http::StatusCode,
     response::IntoResponse,
-    routing::{post},
+    routing::{post, get},
     Json, Router,
 };
 use serde::{Deserialize, Serialize};
@@ -16,6 +16,7 @@ use tower::{BoxError, ServiceBuilder};
 use tower_http::trace::TraceLayer;
 // use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
+use crate::config;
 use crate::prelude::KVStore;
 
 type Store = Arc<dyn KVStore + Send + Sync>;
@@ -32,10 +33,10 @@ pub async fn server(store: Arc<dyn KVStore + Send + Sync>,
        .with(tracing_subscriber::fmt::layer())
        .init();
        */
-    // let db = Db::default();
 
     // Compose the routes
     let app = Router::new()
+        .route("/config", get(get_config))
         .route("/locker", post(create_locker).delete(delete_locker))
         .route("/secret", post(add_secret).delete(remove_secret)
                .put(update_secret).get(get_secret))
@@ -63,6 +64,18 @@ pub async fn server(store: Arc<dyn KVStore + Send + Sync>,
     axum::Server::bind(&addr)
         .serve(app.into_make_service()).
         await.unwrap();
+}
+
+async fn get_config(State(_): State<Store>)
+    -> Result<impl IntoResponse, StatusCode>
+{
+    match config::get_config_str() {
+        Ok(config_str) => Ok(config_str),
+        Err(e) => {
+            println!("Failed to read config, err: {:?}", e);
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Default)]
