@@ -3,9 +3,10 @@ FROM ubuntu:latest as builder
 RUN apt-get update
 
 # Get Ubuntu packages
-RUN apt-get install -y \
-    build-essential \
-    curl clang protobuf-compiler
+RUN apt-get update \
+    && apt-get install -y \
+      build-essential \
+      curl clang protobuf-compiler
 
 # Get Rust
 RUN USER=root curl https://sh.rustup.rs -sSf | bash -s -- -y
@@ -16,7 +17,11 @@ RUN USER=root ls -l $HOME/.cargo/bin/cargo
 RUN USER=root $HOME/.cargo/bin/cargo new --bin secret_vault
 WORKDIR ./secret_vault
 COPY ./Cargo.toml ./Cargo.toml
-ADD . ./
+ADD ./src ./src
+ADD ./protos ./protos
+ADD ./tls ./tls
+ADD ./build.rs ./build.rs
+ADD ./config.json ./config.json
 
 RUN $HOME/.cargo/bin/cargo build --release
 RUN rm ./target/release/deps/secret_vault*

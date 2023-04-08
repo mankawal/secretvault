@@ -4,8 +4,8 @@
         "cors_origin": ["*"],
         "cache": false,
         "proto": {
-            "rest": 33060,
-            "grpc": 33061,
+            "rest": 32360,
+            "grpc": 32361,
             "graphql": 0
         }
     },
