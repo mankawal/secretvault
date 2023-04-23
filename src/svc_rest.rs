@@ -79,12 +79,48 @@ async fn get_config(State(_): State<Store>)
 }
 
 #[derive(Debug, Deserialize, Default)]
+pub struct VaultContext {
+    pub vault_id: String,
+    pub user_name: String,
+    pub user_context: String,
+}
+
+fn check_context(store: &Store, ctx: &VaultContext) ->
+    Result<(), Box<dyn std::error::Error>>
+{
+        // Check if the corresponding vault exists.
+        // TODO: Check if user's is authorized for the operation.
+        // For now, this is a simple check on whether the incoming
+        // user_context matches the user's attribute stored in the
+        // vault's metadata locker.
+        match store.get_kv(&ctx.vault_id, &ctx.user_name) {
+            // Insertion succeeded
+            Ok(user_attrib) =>  {
+                if user_attrib.eq(&ctx.user_context) {
+                    Ok(())
+                } else {
+                    // User attribute failed to match
+                    Err(Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput,
+                                            "incorrect user context")))
+                }
+            },
+            // Failed to find vault or key
+            Err(e) => Err(Box::new(e)),
+        }
+}
+
+#[derive(Debug, Deserialize, Default)]
 pub struct LockerId {
+    pub context: VaultContext,
     pub locker_id: String,
 }
 async fn create_locker(State(store): State<Store>, Json(input): Json<LockerId>)
     -> impl IntoResponse
 {
+    if let Err(e) = check_context(&store, &input.context) {
+        println!("Request context check failed, err: {:?}", e);
+        return StatusCode::FORBIDDEN;
+    }
     match store.create_locker(input.locker_id) {
         Ok(_) => StatusCode::CREATED,
         Err(e) => {
@@ -96,6 +132,10 @@ async fn create_locker(State(store): State<Store>, Json(input): Json<LockerId>)
 async fn delete_locker(State(store): State<Store>, Json(input): Json<LockerId>)
     -> impl IntoResponse
 {
+    if let Err(e) = check_context(&store, &input.context) {
+        println!("Request context check failed, err: {:?}", e);
+        return StatusCode::FORBIDDEN;
+    }
     match store.delete_locker(&input.locker_id) {
         Ok(_) => StatusCode::NO_CONTENT,
         Err(e) => {
@@ -105,15 +145,22 @@ async fn delete_locker(State(store): State<Store>, Json(input): Json<LockerId>)
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Default)]
+#[derive(Debug, Deserialize, Default)]
 pub struct Secret {
+    pub context: VaultContext,
     pub locker_id: String,
     pub secret_key: String,
     pub secret_blob: String,
 }
 
+#[derive(Debug, Serialize, Default)]
+pub struct SecretBlob {
+    pub secret_blob: String,
+}
+
 #[derive(Debug, Deserialize, Default)]
 pub struct SecretKey {
+    pub context: VaultContext,
     pub locker_id: String,
     pub secret_key: String,
 }
@@ -121,6 +168,10 @@ pub struct SecretKey {
 async fn add_secret(State(store): State<Store>, Json(input): Json<Secret>)
     -> impl IntoResponse
 {
+    if let Err(e) = check_context(&store, &input.context) {
+        println!("Request context check failed, err: {:?}", e);
+        return StatusCode::FORBIDDEN;
+    }
     match store.add_kv(&input.locker_id,
                        input.secret_key, input.secret_blob) {
         Ok(_) => StatusCode::CREATED,
@@ -133,6 +184,10 @@ async fn add_secret(State(store): State<Store>, Json(input): Json<Secret>)
 async fn remove_secret(State(store): State<Store>, Json(input): Json<SecretKey>)
     -> impl IntoResponse
 {
+    if let Err(e) = check_context(&store, &input.context) {
+        println!("Request context check failed, err: {:?}", e);
+        return StatusCode::FORBIDDEN;
+    }
     match store.remove_kv(&input.locker_id, &input.secret_key) {
         Ok(_) => StatusCode::NO_CONTENT,
         Err(e) => {
@@ -144,6 +199,10 @@ async fn remove_secret(State(store): State<Store>, Json(input): Json<SecretKey>)
 async fn update_secret(State(store): State<Store>, Json(input): Json<Secret>)
     -> impl IntoResponse
 {
+    if let Err(e) = check_context(&store, &input.context) {
+        println!("Request context check failed, err: {:?}", e);
+        return StatusCode::FORBIDDEN;
+    }
     match store.update_kv(&input.locker_id,
                           &input.secret_key, input.secret_blob) {
         Ok(_) => StatusCode::OK,
@@ -156,11 +215,13 @@ async fn update_secret(State(store): State<Store>, Json(input): Json<Secret>)
 async fn get_secret(State(store): State<Store>, Json(input): Json<SecretKey>)
     -> Result<impl IntoResponse, StatusCode>
 {
+    if let Err(e) = check_context(&store, &input.context) {
+        println!("Request context check failed, err: {:?}", e);
+        return Err(StatusCode::FORBIDDEN);
+    }
     let res = store.get_kv(&input.locker_id, &input.secret_key);
     if let Ok(blob) = res {
-        let secret = Secret {
-            locker_id: input.locker_id,
-            secret_key: input.secret_key,
+        let secret = SecretBlob {
             secret_blob: blob
         };
         return Ok(Json(secret));

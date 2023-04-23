@@ -1,4 +1,16 @@
 {
+    "serve_admin" : {
+        "tls": true,
+        "cors_origin": ["*"],
+        "cache": false,
+        "proto": {
+            "rest": 32350,
+            "grpc": 32351,
+            "graphql": 0
+        },
+        "tls_cert_path": "./tls/admin/server.pem",
+        "tls_key_path": "./tls/admin/server.key"
+    },
     "serve": {
         "tls": true,
         "cors_origin": ["*"],
@@ -7,7 +19,9 @@
             "rest": 32360,
             "grpc": 32361,
             "graphql": 0
-        }
+        },
+        "tls_cert_path": "./tls/server.pem",
+        "tls_key_path": "./tls/server.key"
     },
     "store": {
         "name": "rocks",
@@ -27,5 +41,5 @@
         "interval": 73200,
         "cloud_endpoint": ""
     },
-    "test": false 
+    "test": false
 }

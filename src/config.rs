@@ -16,7 +16,9 @@ pub struct EndpointConfig
     pub tls: bool,
     pub cors_origin: Vec<String>,
     pub cache: bool,
-    pub proto : ProtoConfig,
+    pub proto: ProtoConfig,
+    pub tls_cert_path: String,
+    pub tls_key_path: String,
 }
 
 #[allow(dead_code)]
@@ -54,6 +56,7 @@ pub struct BackupConfig
 #[derive(Deserialize, Debug)]
 pub struct ServiceConfig
 {
+    pub serve_admin: EndpointConfig,
     pub serve: EndpointConfig,
     pub store: StoreConfig,
     pub security: SecurityConfig,
