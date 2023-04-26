@@ -4,14 +4,22 @@
 
 pub trait KVStore
 {
-    fn create_locker(&self, locker: String) -> std::io::Result<()>;
-    fn delete_locker(&self, locker: &str) -> std::io::Result<()>;
+    fn create_db(&self, dbname: String) -> std::io::Result<()>;
+    fn delete_db(&self, dbname: &str) -> std::io::Result<()>;
 
-    fn add_kv(&self, locker: &str, k: String, v: String)
+    fn add_kv(&self, dbname: &str, k: String, v: String)
         -> std::io::Result<()>;
-    fn get_kv(&self, locker: &str, k: &str) -> std::io::Result<String>;
-    fn update_kv(&self, locker: &str, k: &str, v: String)
+    fn get_kv(&self, dbname: &str, k: &str) -> std::io::Result<String>;
+    fn update_kv(&self, dbname: &str, k: &str, v: String)
         -> std::io::Result<()>;
-    fn remove_kv(&self, locker: &str, k: &str) -> std::io::Result<()>;
+    fn remove_kv(&self, dbname: &str, k: &str) -> std::io::Result<()>;
+
+    fn initiate_kv_removal(&self, dbname: &str, k: &str)
+        -> std::io::Result<()>;
+    fn cancel_kv_removal(&self, dbname: &str, k: &str)
+        -> std::io::Result<()>;
+    fn complete_kv_removal(&self, dbname: &str, k: &str)
+        -> std::io::Result<()>;
+    fn list_keys_in_removal(&self, dbname: &str) -> std::io::Result<Vec<String>>;
 }
 

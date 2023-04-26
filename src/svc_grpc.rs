@@ -3,14 +3,11 @@ use crate::config;
 use crate::prelude::KVStore;
 
 use tonic::{Request, Response, Status};
-use crate::secret_vault::{VaultContext,
+use crate::secret_vault::{CommonContext,
     GetConfigRequest, GetConfigResponse,
     CreateLockerRequest, CreateLockerResponse,
+    ReadLockerRequest, ReadLockerResponse,
     DeleteLockerRequest, DeleteLockerResponse,
-    AddSecretRequest, AddSecretResponse,
-    RemoveSecretRequest, RemoveSecretResponse,
-    GetSecretRequest, GetSecretResponse,
-    UpdateSecretRequest, UpdateSecretResponse,
     secret_vault_server::{SecretVault},
 };
 use crate::config::ServiceConfig;
@@ -31,7 +28,7 @@ impl SecretVaultService
         })
     }
 
-    pub fn check_context(&self, ctx: &VaultContext) ->
+    pub fn check_context(&self, ctx: &CommonContext) ->
         Result<(), Status>
     {
         // Check if the corresponding vault exists.
@@ -49,7 +46,6 @@ impl SecretVaultService
                                     "Stale/incorrect user context"))
                 }
             },
-            // Found a duplicate, failed
             Err(_) =>
                 Err(Status::new(tonic::Code::NotFound, std::format!(
                             "Vault {} not found", &ctx.vault_id)))
@@ -80,11 +76,10 @@ impl SecretVault for SecretVaultService
         if let Err(e) = self.check_context(&req.context) {
             return Err(e);
         }
-        match self.lockers.create_locker(req.locker_id) {
-            // Insertion succeeded
+        match self.lockers.add_kv(&req.context.vault_id,
+                                  req.locker_id, req.locker_contents) {
             Ok(_) =>  Ok(Response::new(CreateLockerResponse{})),
-            // Found a duplicate, failed
-            Err(e) => Err(Status::new(tonic::Code::AlreadyExists,
+            Err(e) => Err(Status::new(tonic::Code::InvalidArgument,
                     std::format!("Err: {}", e))),
         }
     }
@@ -92,79 +87,30 @@ impl SecretVault for SecretVaultService
     async fn delete_locker(&self, req: Request<DeleteLockerRequest>)
         -> Result<Response<DeleteLockerResponse>, Status>
     {
+        // TODO: Change to deferred removal scheme.
         let req = req.into_inner();
         if let Err(e) = self.check_context(&req.context) {
             return Err(e);
         }
-        match self.lockers.delete_locker(&req.locker_id) {
+        match self.lockers.remove_kv(&req.context.vault_id, &req.locker_id) {
             Ok(_) =>  Ok(Response::new(DeleteLockerResponse{})),
             Err(e) => Err(Status::new(tonic::Code::NotFound,
                     std::format!("Err: {}", e))),
         }
     }
 
-    async fn add_secret(&self, req: Request<AddSecretRequest>)
-        -> Result<Response<AddSecretResponse>, Status>
+    async fn read_locker(&self, req: Request<ReadLockerRequest>)
+        -> Result<Response<ReadLockerResponse>, Status>
     {
         let req = req.into_inner();
         if let Err(e) = self.check_context(&req.context) {
             return Err(e);
         }
-        match self.lockers.add_kv(
-            &req.locker_id, req.secret_key, req.secret_blob) {
-            Ok(_) => Ok(Response::new(AddSecretResponse{})),
-            // TODO: Sending this error response might inform
-            // a malicious actor of presence/absence of a secret.
-            Err(e) => Err(Status::new(tonic::Code::AlreadyExists,
-                    std::format!("Err: {}", e))),
-        }
-    }
-
-    async fn remove_secret(&self, req: Request<RemoveSecretRequest>)
-        -> Result<Response<RemoveSecretResponse>, Status>
-    {
-        let req = req.into_inner();
-        if let Err(e) = self.check_context(&req.context) {
-            return Err(e);
-        }
-        match self.lockers.remove_kv(&req.locker_id, &req.secret_key) {
-            Ok(_) => Ok(Response::new(RemoveSecretResponse{})),
-            // TODO: Sending this error response might inform
-            // a malicious actor of presence/absence of a secret.
-            Err(e)=> Err(Status::new(tonic::Code::AlreadyExists,
-                    std::format!("Err: {}", e))),
-        }
-    }
-
-    async fn get_secret(&self, req: Request<GetSecretRequest>)
-        -> Result<Response<GetSecretResponse>, Status>
-    {
-        let req = req.into_inner();
-        if let Err(e) = self.check_context(&req.context) {
-            return Err(e);
-        }
-        match self.lockers.get_kv(&req.locker_id, &req.secret_key) {
-            Ok(blob) => Ok(Response::new(GetSecretResponse{
-                secret_blob: blob,
+        match self.lockers.get_kv(&req.context.vault_id, &req.locker_id) {
+            Ok(contents) => Ok(Response::new(ReadLockerResponse {
+                locker_contents: contents,
             })),
             Err(e) => Err(Status::new(tonic::Code::NotFound,
-                    std::format!("Err: {}", e))),
-        }
-    }
-
-    async fn update_secret(&self, req: Request<UpdateSecretRequest>)
-        -> Result<Response<UpdateSecretResponse>, Status>
-    {
-        let req = req.into_inner();
-        if let Err(e) = self.check_context(&req.context) {
-            return Err(e);
-        }
-        match self.lockers.update_kv(
-            &req.locker_id, &req.secret_key, req.secret_blob) {
-            Ok(_) => Ok(Response::new(UpdateSecretResponse{})),
-            // TODO: Sending this error response might inform
-            // a malicious actor of presence/absence of a secret.
-            Err(e) => Err(Status::new(tonic::Code::InvalidArgument,
                     std::format!("Err: {}", e))),
         }
     }

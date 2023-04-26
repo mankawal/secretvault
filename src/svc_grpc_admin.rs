@@ -52,7 +52,7 @@ impl SecretVaultAdmin for SecretVaultAdminService
         Result<Response<CreateVaultResponse>, Status>
     {
         let req = req.into_inner();
-        match self.vaults.create_locker(req.vault_id) {
+        match self.vaults.create_db(req.vault_id) {
             // Insertion succeeded
             Ok(_) =>  Ok(Response::new(CreateVaultResponse{})),
             // Found a duplicate, failed
@@ -65,7 +65,7 @@ impl SecretVaultAdmin for SecretVaultAdminService
         -> Result<Response<DeleteVaultResponse>, Status>
     {
         let req = req.into_inner();
-        match self.vaults.delete_locker(&req.vault_id) {
+        match self.vaults.delete_db(&req.vault_id) {
             Ok(_) =>  Ok(Response::new(DeleteVaultResponse{})),
             Err(e) => Err(Status::new(tonic::Code::NotFound,
                     std::format!("Err: {}", e))),

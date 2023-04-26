@@ -85,7 +85,7 @@ pub struct LockerId {
 async fn create_vault(State(store): State<Store>, Json(input): Json<LockerId>)
     -> impl IntoResponse
 {
-    match store.create_locker(input.vault_id) {
+    match store.create_db(input.vault_id) {
         Ok(_) => StatusCode::CREATED,
         Err(e) => {
             println!("Failed to create locker, err: {:?}", e);
@@ -96,7 +96,7 @@ async fn create_vault(State(store): State<Store>, Json(input): Json<LockerId>)
 async fn delete_vault(State(store): State<Store>, Json(input): Json<LockerId>)
     -> impl IntoResponse
 {
-    match store.delete_locker(&input.vault_id) {
+    match store.delete_db(&input.vault_id) {
         Ok(_) => StatusCode::NO_CONTENT,
         Err(e) => {
             println!("Failed to delete locker, err: {:?}", e);

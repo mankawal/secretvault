@@ -2,6 +2,8 @@ use std::sync::Arc;
 use crate::prelude::KVStore;
 use crate::config;
 
+#[allow(unused_variables)]
+
 // --- RocksDb based KVStore
 
 pub fn build_kvstore_rocks(cfg: &config::StoreConfig)
@@ -35,7 +37,7 @@ impl RocksDbVault
 
 impl KVStore for RocksDbVault
 {
-    fn create_locker(&self, locker: String) -> std::io::Result<()>
+    fn create_db(&self, locker: String) -> std::io::Result<()>
     {
         // TODO: Customizations for small db size, point lookups
         // are available here for use as directed by the service config.
@@ -50,7 +52,7 @@ impl KVStore for RocksDbVault
         }
     }
     
-    fn delete_locker(&self, locker: &str) -> std::io::Result<()>
+    fn delete_db(&self, locker: &str) -> std::io::Result<()>
     {
         match self.db.drop_cf(locker) {
             Ok(()) => Ok(()),
@@ -138,7 +140,7 @@ impl KVStore for RocksDbVault
                         } else {
                             Err(std::io::Error::new(
                                     std::io::ErrorKind::InvalidInput,
-                                        "key lookup returned null".to_string()))
+                                    "key lookup returned null".to_string()))
                         }
                     },
                     Err(e) => Err(std::io::Error::new(
@@ -152,5 +154,28 @@ impl KVStore for RocksDbVault
                     "Locker not found")),
         }
     }
+    fn initiate_kv_removal(&self, dbname: &str, k: &str)
+        -> std::io::Result<()>
+    {
+        Ok(())
+    }
+
+    fn cancel_kv_removal(&self, dbname: &str, k: &str)
+        -> std::io::Result<()>
+    {
+        Ok(())
+    }
+
+    fn complete_kv_removal(&self, dbname: &str, k: &str)
+        -> std::io::Result<()>
+    {
+        Ok(())
+    }
+
+    fn list_keys_in_removal(&self, dbname: &str) -> std::io::Result<Vec<String>>
+    {
+        Ok(Vec::new())
+    }
+
 }
 

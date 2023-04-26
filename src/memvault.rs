@@ -7,82 +7,75 @@ use crate::config;
 pub fn build_kvstore_mem(_cfg: &config::StoreConfig)
     -> std::io::Result<Arc<dyn KVStore + Send + Sync>>
 {
-    let mv = MemVault::new();
+    let mv = MemVaultMap::new();
     Ok(Arc::new(mv))
 }
 
 #[derive(Debug, Default)]
-pub struct MemVault 
+pub struct MemVaultMap 
 {
-    map: Arc<RwLock<HashMap<String, MemLocker>>>
+    map: Arc<RwLock<HashMap<String, MemVault>>>
 }
 
-impl MemVault
+impl MemVaultMap
 {
-    pub fn new() -> MemVault 
+    pub fn new() -> MemVaultMap 
     {
-        MemVault{ map: Arc::new(RwLock::new(HashMap::new())) }
+        MemVaultMap{ map: Arc::new(RwLock::new(HashMap::new())) }
     }
 }
 
-impl Clone for MemVault
+impl Clone for MemVaultMap
 {
-    fn clone(&self) -> MemVault
+    fn clone(&self) -> MemVaultMap
     {
-        MemVault{ map: self.map.clone() }
+        MemVaultMap{ map: self.map.clone() }
     }
 
 }
 
-impl KVStore for MemVault
+impl KVStore for MemVaultMap
 {
-    fn create_locker(&self, locker: String) -> std::io::Result<()>
+    fn create_db(&self, vault: String) -> std::io::Result<()>
     {
         let mut map_locked = self.map.write().unwrap();
-        match map_locked.insert(locker, MemLocker::new()) {
+        match map_locked.insert(vault, MemVault::new()) {
             Some(_) => Err(std::io::Error::new(
                 std::io::ErrorKind::AlreadyExists,
-                "Duplicate locker name")),
+                "Duplicate vault name")),
             None => Ok(()),
         }
     }
 
-    fn delete_locker(&self, locker: &str) -> std::io::Result<()>
+    fn delete_db(&self, vault: &str) -> std::io::Result<()>
     {
         let mut map_locked = self.map.write().unwrap();
-        match map_locked.remove(locker) {
+        match map_locked.remove(vault) {
             Some(_) => Ok(()),
             None => Err(std::io::Error::new(
                     std::io::ErrorKind::NotFound,
-                    "Locker not found")),
+                    "Vault not found")),
         }
     }
 
-    fn add_kv(&self, locker: &str,
+    fn add_kv(&self, vault: &str,
               k: String, v: String) -> std::io::Result<()>
     {
         let map_locked = self.map.read().unwrap();
-        match map_locked.get(locker) {
-            Some(locker) => {
-                match locker.add(k, v) {
-                    true => Ok(()),
-                    false => Err(std::io::Error::new(
-                            std::io::ErrorKind::AlreadyExists,
-                            "Duplicate key")),
-                }
-            },
+        match map_locked.get(vault) {
+            Some(vault) =>  vault.add(k, v),
             None => Err(std::io::Error::new(
                     std::io::ErrorKind::NotFound,
-                    "Locker not found")),
+                    "Vault not found")),
         }
     }
-    fn update_kv(&self, locker: &str,
+    fn update_kv(&self, vault: &str,
               k: &str, v: String) -> std::io::Result<()>
     {
         let map_locked = self.map.read().unwrap();
-        match map_locked.get(locker) {
-            Some(locker) => {
-                match locker.update(k, v) {
+        match map_locked.get(vault) {
+            Some(vault) => {
+                match vault.update(k, v) {
                     true => Ok(()),
                     false => Err(std::io::Error::new(
                             std::io::ErrorKind::NotFound,
@@ -91,15 +84,15 @@ impl KVStore for MemVault
             },
             None => Err(std::io::Error::new(
                     std::io::ErrorKind::NotFound,
-                    "Locker not found")),
+                    "Vault not found")),
         }
     }
-    fn remove_kv(&self, locker: &str, k: &str) -> std::io::Result<()>
+    fn remove_kv(&self, vault: &str, k: &str) -> std::io::Result<()>
     {
         let map_locked = self.map.read().unwrap();
-        match map_locked.get(locker) {
-            Some(locker) => {
-                match locker.del(k) {
+        match map_locked.get(vault) {
+            Some(vault) => {
+                match vault.del(k) {
                     true => Ok(()),
                     false => Err(std::io::Error::new(
                             std::io::ErrorKind::NotFound,
@@ -108,16 +101,16 @@ impl KVStore for MemVault
             },
             None => Err(std::io::Error::new(
                     std::io::ErrorKind::NotFound,
-                    "Locker not found")),
+                    "Vault not found")),
         }
     }
 
-    fn get_kv(&self, locker: &str, k: &str) -> std::io::Result<String>
+    fn get_kv(&self, vault: &str, k: &str) -> std::io::Result<String>
     {
         let map_locked = self.map.read().unwrap();
-        match map_locked.get(locker) {
-            Some(locker) => {
-                match locker.get(k) {
+        match map_locked.get(vault) {
+            Some(vault) => {
+                match vault.get(k) {
                     Some(value) => Ok(value),
                     None => Err(std::io::Error::new(
                             std::io::ErrorKind::NotFound,
@@ -126,58 +119,160 @@ impl KVStore for MemVault
             },
             None => Err(std::io::Error::new(
                     std::io::ErrorKind::NotFound,
-                    "Locker not found")),
+                    "Vault not found")),
+        }
+    }
+
+    fn initiate_kv_removal(&self, vault: &str, k: &str)
+        -> std::io::Result<()>
+    {
+        let map_locked = self.map.read().unwrap();
+        match map_locked.get(vault) {
+            Some(vault) => {
+                vault.initiate_kv_removal(k)
+            },
+            None => Err(std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    "Vault not found")),
+        }
+    }
+
+    fn cancel_kv_removal(&self, vault: &str, k: &str)
+        -> std::io::Result<()>
+    {
+        let map_locked = self.map.read().unwrap();
+        match map_locked.get(vault) {
+            Some(vault) => {
+                vault.cancel_kv_removal(k)
+            },
+            None => Err(std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    "Vault not found")),
+        }
+    }
+
+    fn complete_kv_removal(&self, vault: &str, k: &str)
+        -> std::io::Result<()>
+    {
+        self.remove_kv(vault, k)
+    }
+
+    fn list_keys_in_removal(&self, vault: &str)
+        -> std::io::Result<Vec<String>>
+    {
+        let map_locked = self.map.read().unwrap();
+        match map_locked.get(vault) {
+            Some(vault) => {
+                vault.list_keys_in_removal()
+            },
+            None => Err(std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    "Vault not found")),
         }
     }
 }
 
-impl std::fmt::Display for MemVault
+impl std::fmt::Display for MemVaultMap
 {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result
     {
         let map_locked = self.map.read().unwrap();
         for (k,v) in map_locked.iter() {
-            write!(f, "\n---- locker: {k} ----:\n{v}\n",)?;
+            write!(f, "\n---- vault: {k} ----:\n{v}\n",)?;
         }
         Ok(())
     }
 }
 
 #[derive(Debug, Default)]
-pub struct MemLocker
+struct Vault
 {
-    map: Arc<RwLock<HashMap<String, String>>>
+    map: HashMap<String, String>,
+    del_map: HashMap<String, String>,
 }
 
-impl MemLocker
+impl Vault
 {
-    pub fn new() -> MemLocker
+    fn initiate_kv_removal(&mut self, k: &str)
+        -> std::io::Result<()>
     {
-        MemLocker{ map: Arc::new(RwLock::new(HashMap::new())) }
+        match self.map.get(k) {
+            Some(v) => {
+                self.del_map.insert(k.to_string(), v.to_string());
+                self.map.remove(k);
+                Ok(())
+            },
+            None => Err(std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    "Key {k} not found"))
+        }
+    }
+
+    fn cancel_kv_removal(&mut self, k: &str)
+        -> std::io::Result<()>
+    {
+        match self.del_map.get(k) {
+            Some(v) => {
+                self.map.insert(k.to_string(), v.to_string());
+                self.del_map.remove(k);
+                Ok(())
+            },
+            None => Err(std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    "Key {k} not found"))
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct MemVault
+{
+    vault: Arc<RwLock<Vault>>
+}
+
+impl MemVault
+{
+    pub fn new() -> MemVault
+    {
+        MemVault{ vault: Arc::new(RwLock::new(Vault::default())) }
     }
     
-    pub fn add(&self, key: String, val: String) -> bool
+    pub fn add(&self, key: String, val: String)
+        -> std::io::Result<()>
     {
-        let mut map_locked = self.map.write().unwrap();
-        map_locked.insert(key, val).is_none()
+        let mut vault_locked = self.vault.write().unwrap();
+        // Do not allow creating a key if its old incarnation
+        // is in `deleting` state.
+        if vault_locked.del_map.get(&key).is_some() {
+            return Err(std::io::Error::new(
+                    std::io::ErrorKind::AlreadyExists,
+                    std::format!("Key found in DELETING state.")));
+        }
+        if vault_locked.map.insert(key, val).is_some() {
+            return Err(std::io::Error::new(
+                    std::io::ErrorKind::AlreadyExists,
+                    std::format!("Duplicate key found.")));
+        }
+        Ok(())
     }
 
     pub fn del(&self, key: &str) -> bool
     {
-        let mut map_locked = self.map.write().unwrap();
-        map_locked.remove(key).is_some()
+        let mut vault_locked = self.vault.write().unwrap();
+        vault_locked.map.remove(key).is_some() ||
+            vault_locked.del_map.remove(key).is_some()
     }
 
     pub fn get(&self, key: &str) -> Option<String>
     {
-        let map_locked = self.map.read().unwrap();
-        map_locked.get(key).map(|val| val.clone())
+        let vault_locked = self.vault.read().unwrap();
+        vault_locked.map.get(key).map(|val| val.clone())
     }
 
     pub fn update(&self, k: &str, v: String) -> bool
     {
-        let mut map_locked = self.map.write().unwrap();
-        match map_locked.get_mut(k) {
+        let mut vault_locked = self.vault.write().unwrap();
+        match vault_locked.map.get_mut(k) {
             Some(old_val) => {
                 *old_val = v;
                 true
@@ -185,15 +280,40 @@ impl MemLocker
             None => false,
         }
     }
+
+    pub fn initiate_kv_removal(&self, k: &str)
+        -> std::io::Result<()>
+    {
+        let mut vault_locked = self.vault.write().unwrap();
+        vault_locked.initiate_kv_removal(&k)
+    }
+
+    pub fn cancel_kv_removal(&self, k: &str)
+        -> std::io::Result<()>
+    {
+        let mut vault_locked = self.vault.write().unwrap();
+        vault_locked.cancel_kv_removal(&k)
+    }
+
+    pub fn list_keys_in_removal(&self)
+        -> std::io::Result<Vec<String>>
+    {
+        let vault_locked = self.vault.read().unwrap();
+        Ok(vault_locked.map.clone().into_keys().collect())
+    }
 }
 
-impl std::fmt::Display for MemLocker
+impl std::fmt::Display for MemVault
 {
     fn fmt(&self, f:&mut std::fmt::Formatter) -> std::fmt::Result
     {
-        let map_locked = self.map.read().unwrap();
-        for (k,v) in map_locked.iter() {
-            write!(f, "{k}: {v}")?;
+        let vault_locked = self.vault.read().unwrap();
+        for (k,v) in vault_locked.map.iter() {
+            write!(f, "{k}: {v}\n")?;
+        }
+        write!(f, " - Keys in removal - \n")?;
+        for (k,_) in vault_locked.del_map.iter() {
+            write!(f, "\t{k}\n")?;
         }
         Ok(())
     }

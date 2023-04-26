@@ -28,7 +28,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>>
 
     let args:Vec<_> = env::args().collect();
     if args.len() > 1 {
-        // test_vault_locker();
+        tests::test_vault_locker();
         tests::test_client_workflow(&config).await;
         return Ok(());
     }

@@ -37,9 +37,8 @@ pub async fn server(store: Arc<dyn KVStore + Send + Sync>,
     // Compose the routes
     let app = Router::new()
         .route("/config", get(get_config))
-        .route("/locker", post(create_locker).delete(delete_locker))
-        .route("/secret", post(add_secret).delete(remove_secret)
-               .put(update_secret).get(get_secret))
+        .route("/locker",
+               post(create_locker).delete(delete_locker).get(read_locker))
         // Add middleware to all routes
         .layer(
             ServiceBuilder::new()
@@ -79,13 +78,13 @@ async fn get_config(State(_): State<Store>)
 }
 
 #[derive(Debug, Deserialize, Default)]
-pub struct VaultContext {
+pub struct CommonContext {
     pub vault_id: String,
     pub user_name: String,
     pub user_context: String,
 }
 
-fn check_context(store: &Store, ctx: &VaultContext) ->
+fn check_context(store: &Store, ctx: &CommonContext) ->
     Result<(), Box<dyn std::error::Error>>
 {
         // Check if the corresponding vault exists.
@@ -111,17 +110,29 @@ fn check_context(store: &Store, ctx: &VaultContext) ->
 
 #[derive(Debug, Deserialize, Default)]
 pub struct LockerId {
-    pub context: VaultContext,
+    pub context: CommonContext,
     pub locker_id: String,
 }
-async fn create_locker(State(store): State<Store>, Json(input): Json<LockerId>)
+#[derive(Debug, Deserialize, Default)]
+pub struct Locker {
+    pub context: CommonContext,
+    pub locker_id: String,
+    pub locker_contents: String,
+}
+#[derive(Debug, Serialize, Default)]
+pub struct LockerContents {
+    pub contents: String,
+}
+
+async fn create_locker(State(store): State<Store>, Json(input): Json<Locker>)
     -> impl IntoResponse
 {
     if let Err(e) = check_context(&store, &input.context) {
         println!("Request context check failed, err: {:?}", e);
         return StatusCode::FORBIDDEN;
     }
-    match store.create_locker(input.locker_id) {
+    match store.add_kv(&input.context.vault_id,
+                          input.locker_id, input.locker_contents) {
         Ok(_) => StatusCode::CREATED,
         Err(e) => {
             println!("Failed to create locker, err: {:?}", e);
@@ -132,11 +143,12 @@ async fn create_locker(State(store): State<Store>, Json(input): Json<LockerId>)
 async fn delete_locker(State(store): State<Store>, Json(input): Json<LockerId>)
     -> impl IntoResponse
 {
+    // TODO: Use deferred removal scheme for deleting lockers.
     if let Err(e) = check_context(&store, &input.context) {
         println!("Request context check failed, err: {:?}", e);
         return StatusCode::FORBIDDEN;
     }
-    match store.delete_locker(&input.locker_id) {
+    match store.remove_kv(&input.context.vault_id, &input.locker_id) {
         Ok(_) => StatusCode::NO_CONTENT,
         Err(e) => {
             println!("Failed to delete locker, err: {:?}", e);
@@ -145,87 +157,23 @@ async fn delete_locker(State(store): State<Store>, Json(input): Json<LockerId>)
     }
 }
 
-#[derive(Debug, Deserialize, Default)]
-pub struct Secret {
-    pub context: VaultContext,
-    pub locker_id: String,
-    pub secret_key: String,
-    pub secret_blob: String,
-}
-
-#[derive(Debug, Serialize, Default)]
-pub struct SecretBlob {
-    pub secret_blob: String,
-}
-
-#[derive(Debug, Deserialize, Default)]
-pub struct SecretKey {
-    pub context: VaultContext,
-    pub locker_id: String,
-    pub secret_key: String,
-}
-
-async fn add_secret(State(store): State<Store>, Json(input): Json<Secret>)
-    -> impl IntoResponse
-{
-    if let Err(e) = check_context(&store, &input.context) {
-        println!("Request context check failed, err: {:?}", e);
-        return StatusCode::FORBIDDEN;
-    }
-    match store.add_kv(&input.locker_id,
-                       input.secret_key, input.secret_blob) {
-        Ok(_) => StatusCode::CREATED,
-        Err(e) => {
-            println!("Failed to create secret, err: {:?}", e);
-            StatusCode::FOUND
-        },
-    }
-}
-async fn remove_secret(State(store): State<Store>, Json(input): Json<SecretKey>)
-    -> impl IntoResponse
-{
-    if let Err(e) = check_context(&store, &input.context) {
-        println!("Request context check failed, err: {:?}", e);
-        return StatusCode::FORBIDDEN;
-    }
-    match store.remove_kv(&input.locker_id, &input.secret_key) {
-        Ok(_) => StatusCode::NO_CONTENT,
-        Err(e) => {
-            println!("Failed to delete secret, err: {:?}", e);
-            StatusCode::NOT_FOUND
-        },
-    }
-}
-async fn update_secret(State(store): State<Store>, Json(input): Json<Secret>)
-    -> impl IntoResponse
-{
-    if let Err(e) = check_context(&store, &input.context) {
-        println!("Request context check failed, err: {:?}", e);
-        return StatusCode::FORBIDDEN;
-    }
-    match store.update_kv(&input.locker_id,
-                          &input.secret_key, input.secret_blob) {
-        Ok(_) => StatusCode::OK,
-        Err(e) => {
-            println!("Failed to update secret, err: {:?}", e);
-            StatusCode::NOT_FOUND
-        },
-    }
-}
-async fn get_secret(State(store): State<Store>, Json(input): Json<SecretKey>)
+async fn read_locker(State(store): State<Store>, Json(input): Json<LockerId>)
     -> Result<impl IntoResponse, StatusCode>
 {
     if let Err(e) = check_context(&store, &input.context) {
         println!("Request context check failed, err: {:?}", e);
         return Err(StatusCode::FORBIDDEN);
     }
-    let res = store.get_kv(&input.locker_id, &input.secret_key);
-    if let Ok(blob) = res {
-        let secret = SecretBlob {
-            secret_blob: blob
-        };
-        return Ok(Json(secret));
+    match store.get_kv(&input.context.vault_id, &input.locker_id) {
+        Ok(contents) => {
+            let result = LockerContents {
+                contents: contents
+            };
+            return Ok(Json(result));
+        },
+        Err(e) => {
+            println!("Failed to find secret, err: {:?}", e);
+            Err(StatusCode::NOT_FOUND)
+        }
     }
-    println!("Failed to find secret, err: {:?}", res);
-    Err(StatusCode::NOT_FOUND)
 }
