@@ -11,6 +11,9 @@ use crate::secret_vault::{
     RemoveMetadataRequest, RemoveMetadataResponse,
     GetMetadataRequest, GetMetadataResponse,
     UpdateMetadataRequest, UpdateMetadataResponse,
+    DeleteLockerRequest, DeleteLockerResponse,
+    ResuscitateLockerRequest, ResuscitateLockerResponse,
+    ListLockersInDeleteRequest, ListLockersInDeleteResponse,
     secret_vault_admin_server::{SecretVaultAdmin},
 };
 use crate::config::ServiceConfig;
@@ -79,8 +82,6 @@ impl SecretVaultAdmin for SecretVaultAdminService
         match self.vaults.add_kv(
             &req.vault_id, req.name, req.value) {
             Ok(_) => Ok(Response::new(AddMetadataResponse{})),
-            // TODO: Sending this error response might inform
-            // a malicious actor of presence/absence of a secret.
             Err(e) => Err(Status::new(tonic::Code::AlreadyExists,
                     std::format!("Err: {}", e))),
         }
@@ -92,8 +93,6 @@ impl SecretVaultAdmin for SecretVaultAdminService
         let req = req.into_inner();
         match self.vaults.remove_kv(&req.vault_id, &req.name) {
             Ok(_) => Ok(Response::new(RemoveMetadataResponse{})),
-            // TODO: Sending this error response might inform
-            // a malicious actor of presence/absence of a secret.
             Err(e)=> Err(Status::new(tonic::Code::AlreadyExists,
                     std::format!("Err: {}", e))),
         }
@@ -119,8 +118,46 @@ impl SecretVaultAdmin for SecretVaultAdminService
         match self.vaults.update_kv(
             &req.vault_id, &req.name, req.value) {
             Ok(_) => Ok(Response::new(UpdateMetadataResponse{})),
-            // TODO: Sending this error response might inform
-            // a malicious actor of presence/absence of a secret.
+            Err(e) => Err(Status::new(tonic::Code::InvalidArgument,
+                    std::format!("Err: {}", e))),
+        }
+    }
+    
+    async fn delete_locker(&self, req: Request<DeleteLockerRequest>)
+        -> Result<Response<DeleteLockerResponse>, Status>
+    {
+        let req = req.into_inner();
+        match self.vaults.complete_kv_removal(&req.vault_id, &req.locker_id) {
+            Ok(_) => Ok(Response::new(DeleteLockerResponse{})),
+            Err(e) => Err(Status::new(tonic::Code::InvalidArgument,
+                    std::format!("Err: {}", e))),
+        }
+    }
+
+    async fn resuscitate_locker(&self, req: Request<ResuscitateLockerRequest>)
+        -> Result<Response<ResuscitateLockerResponse>, Status>
+    {
+        let req = req.into_inner();
+        match self.vaults.cancel_kv_removal(
+            &req.vault_id, &req.locker_id) {
+            Ok(_) => Ok(Response::new(ResuscitateLockerResponse{})),
+            Err(e) => Err(Status::new(tonic::Code::InvalidArgument,
+                    std::format!("Err: {}", e))),
+        }
+    }
+
+    async fn list_lockers_in_delete(
+        &self,req: Request<ListLockersInDeleteRequest>)
+        -> Result<Response<ListLockersInDeleteResponse>, Status>
+    {
+        let req = req.into_inner();
+        match self.vaults.list_keys_in_removal(&req.vault_id) {
+            Ok(keys) => {
+                println!("Pending delete keys: {:?}", keys);
+                Ok(Response::new(ListLockersInDeleteResponse{
+                    lockers: keys
+                }))
+            },
             Err(e) => Err(Status::new(tonic::Code::InvalidArgument,
                     std::format!("Err: {}", e))),
         }

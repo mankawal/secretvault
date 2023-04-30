@@ -10,11 +10,12 @@ use crate::memvault::MemVaultMap;
 use crate::secret_vault::{
     CreateVaultRequest, DeleteVaultRequest,
     AddMetadataRequest, UpdateMetadataRequest, RemoveMetadataRequest,
+    ListLockersInDeleteRequest, ResuscitateLockerRequest,
     secret_vault_admin_client::SecretVaultAdminClient,
 };
 use crate::secret_vault::{
     CommonContext,
-    CreateLockerRequest, DeleteLockerRequest, ReadLockerRequest,
+    CreateLockerRequest, InitiateLockerDeletionRequest, ReadLockerRequest,
     secret_vault_client::SecretVaultClient,
 };
 
@@ -25,7 +26,6 @@ pub fn test_vault_locker()
     let vault_r = vault.clone();
     let thd1 = thread::spawn(move || {
         for attempt in 1..14 {
-            let vaultname = String::from("v1");
             thread::sleep(time::Duration::from_secs(1));
             println!("Read attempt {attempt}\n{vault_r}");
         }
@@ -133,7 +133,48 @@ pub async fn test_client_workflow(cfg: &config::ServiceConfig)
             println!("Created user {} in vault {}", &username, &vault);
         }
 
-        thread::sleep(time::Duration::from_secs(7));
+        thread::sleep(time::Duration::from_secs(11));
+
+        thread::sleep(time::Duration::from_secs(3));
+        let list_pending_deletes_req = Request::new(ListLockersInDeleteRequest {
+            vault_id: vault.clone()
+        });
+        if let Ok(resp) = admin_client.list_lockers_in_delete(
+            list_pending_deletes_req).await {
+            println!("Lockers in pending delete: {:?}",
+                     resp.into_inner().lockers);
+        } else {
+            println!("Failed to get pending delete lockers");
+        }
+
+        thread::sleep(time::Duration::from_secs(3));
+        for i in 3..6 {
+            let req = Request::new(ResuscitateLockerRequest{
+                vault_id: vault.clone(),
+                locker_id: std::format!("key_{}", i),
+            });
+            match admin_client.resuscitate_locker(req).await {
+                Ok(_) => { println!("Resuscitate locker (key_{})", i); },
+                Err(e) => {
+                    println!("Failed to resuscitate locker (key_{}), {}", i, e);
+                },
+            }
+        }
+
+        let list_pending_deletes_req = Request::new(ListLockersInDeleteRequest {
+            vault_id: vault.clone()
+        });
+        match admin_client.list_lockers_in_delete(
+            list_pending_deletes_req).await {
+            Ok(resp) => {
+                println!("Lockers in pending delete: {:?}",
+                         resp.into_inner().lockers);
+            },
+            Err(_) => {
+                println!("Failed to get pending delete lockers");
+            }
+        }
+
         let update_user_req = Request::new(UpdateMetadataRequest{
             vault_id: vault.clone(),
             name: username.clone(),
@@ -144,7 +185,7 @@ pub async fn test_client_workflow(cfg: &config::ServiceConfig)
                      &username, &vault, e);
         }
 
-        thread::sleep(time::Duration::from_secs(3));
+        thread::sleep(time::Duration::from_secs(4));
         let remove_user_req = Request::new(RemoveMetadataRequest{
             vault_id: vault.clone(),
             name: username.clone(),
@@ -200,15 +241,15 @@ pub async fn test_client_workflow(cfg: &config::ServiceConfig)
             }
         };
         let mut reader_client = SecretVaultClient::new(channel);
-        for i in 1..8 {
+        for i in 1..18 {
             println!("Read attempt {i}");
             for (k,v) in expected_key_value_pairs.iter() {
                 let req = Request::new(ReadLockerRequest {
-                    context: CommonContext {
+                    context: Some(CommonContext {
                         vault_id: vault.clone(),
                         user_name: username.clone(),
                         user_context: user_ctx.clone(),
-                    },
+                    }),
                     locker_id: k.clone(),
                 });
                 match reader_client.read_locker(req).await {
@@ -263,11 +304,11 @@ pub async fn test_client_workflow(cfg: &config::ServiceConfig)
         // Create lockers
         for i in 1..6 {
             let req = Request::new(CreateLockerRequest {
-                context: CommonContext {
+                context: Some(CommonContext {
                     vault_id: vault.clone(),
                     user_name: username.clone(),
                     user_context: user_ctx.clone(),
-                },
+                }),
                 locker_id: std::format!("key_{}", i),
                 locker_contents: std::format!("value_{}", i),
             });
@@ -282,15 +323,15 @@ pub async fn test_client_workflow(cfg: &config::ServiceConfig)
         // Remove lockers
         thread::sleep(time::Duration::from_secs(2));
         for i in 1..6 {
-            let req = Request::new(DeleteLockerRequest {
-                context: CommonContext {
+            let req = Request::new(InitiateLockerDeletionRequest {
+                context: Some(CommonContext {
                     vault_id: vault.clone(),
                     user_name: username.clone(),
                     user_context: user_ctx.clone(),
-                },
+                }),
                 locker_id: std::format!("key_{}", i),
             });
-            match writer_client.delete_locker(req).await {
+            match writer_client.initiate_locker_deletion(req).await {
                 Ok(_) => { println!("Removed locker (key_{})", i); },
                 Err(e) => {
                     println!("Failed to remove locker (key_{}), {}", i, e);
@@ -304,5 +345,5 @@ pub async fn test_client_workflow(cfg: &config::ServiceConfig)
     let _ = thd2.await;
     let _ = thd1.await;
 
-    println!("Spawned test clients");
+    println!("Test complete");
 }

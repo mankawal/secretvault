@@ -7,7 +7,7 @@ use crate::secret_vault::{CommonContext,
     GetConfigRequest, GetConfigResponse,
     CreateLockerRequest, CreateLockerResponse,
     ReadLockerRequest, ReadLockerResponse,
-    DeleteLockerRequest, DeleteLockerResponse,
+    InitiateLockerDeletionRequest, InitiateLockerDeletionResponse,
     secret_vault_server::{SecretVault},
 };
 use crate::config::ServiceConfig;
@@ -73,10 +73,14 @@ impl SecretVault for SecretVaultService
         Result<Response<CreateLockerResponse>, Status>
     {
         let req = req.into_inner();
-        if let Err(e) = self.check_context(&req.context) {
+        let Some(ctx) = req.context else {
+            return Err(Status::new(tonic::Code::InvalidArgument,
+                        "Failed to extract vault context from request"));
+        };
+        if let Err(e) = self.check_context(&ctx) {
             return Err(e);
         }
-        match self.lockers.add_kv(&req.context.vault_id,
+        match self.lockers.add_kv(&ctx.vault_id,
                                   req.locker_id, req.locker_contents) {
             Ok(_) =>  Ok(Response::new(CreateLockerResponse{})),
             Err(e) => Err(Status::new(tonic::Code::InvalidArgument,
@@ -84,16 +88,20 @@ impl SecretVault for SecretVaultService
         }
     }
 
-    async fn delete_locker(&self, req: Request<DeleteLockerRequest>)
-        -> Result<Response<DeleteLockerResponse>, Status>
+    async fn initiate_locker_deletion(&self, req: Request<InitiateLockerDeletionRequest>)
+        -> Result<Response<InitiateLockerDeletionResponse>, Status>
     {
-        // TODO: Change to deferred removal scheme.
         let req = req.into_inner();
-        if let Err(e) = self.check_context(&req.context) {
+        let Some(ctx) = req.context else {
+            return Err(Status::new(tonic::Code::InvalidArgument,
+                        "Failed to extract vault context from request"));
+        };
+        if let Err(e) = self.check_context(&ctx) {
             return Err(e);
         }
-        match self.lockers.remove_kv(&req.context.vault_id, &req.locker_id) {
-            Ok(_) =>  Ok(Response::new(DeleteLockerResponse{})),
+        match self.lockers.initiate_kv_removal(
+            &ctx.vault_id, &req.locker_id) {
+            Ok(_) =>  Ok(Response::new(InitiateLockerDeletionResponse{})),
             Err(e) => Err(Status::new(tonic::Code::NotFound,
                     std::format!("Err: {}", e))),
         }
@@ -103,10 +111,14 @@ impl SecretVault for SecretVaultService
         -> Result<Response<ReadLockerResponse>, Status>
     {
         let req = req.into_inner();
-        if let Err(e) = self.check_context(&req.context) {
+        let Some(ctx) = req.context else {
+            return Err(Status::new(tonic::Code::InvalidArgument,
+                        "Failed to extract vault context from request"));
+        };
+        if let Err(e) = self.check_context(&ctx) {
             return Err(e);
         }
-        match self.lockers.get_kv(&req.context.vault_id, &req.locker_id) {
+        match self.lockers.get_kv(&ctx.vault_id, &req.locker_id) {
             Ok(contents) => Ok(Response::new(ReadLockerResponse {
                 locker_contents: contents,
             })),

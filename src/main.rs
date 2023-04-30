@@ -17,7 +17,6 @@ use crate::secret_vault::secret_vault_admin_server::SecretVaultAdminServer;
 use crate::prelude::KVStore;
 
 pub mod secret_vault {
-    tonic::include_proto!("secret_vault_admin");
     tonic::include_proto!("secret_vault");
 }
 
