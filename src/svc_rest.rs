@@ -14,7 +14,7 @@ use std::{
 };
 use tower::{BoxError, ServiceBuilder};
 use tower_http::trace::TraceLayer;
-// use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use crate::config;
 use crate::prelude::KVStore;
@@ -24,7 +24,6 @@ type Store = Arc<dyn KVStore + Send + Sync>;
 pub async fn server(store: Arc<dyn KVStore + Send + Sync>,
                     port: u16, _tls: bool)
 {
-    /*
        tracing_subscriber::registry()
        .with(
        tracing_subscriber::EnvFilter::try_from_default_env()
@@ -32,13 +31,13 @@ pub async fn server(store: Arc<dyn KVStore + Send + Sync>,
        )
        .with(tracing_subscriber::fmt::layer())
        .init();
-       */
 
     // Compose the routes
     let app = Router::new()
         .route("/config", get(get_config))
         .route("/locker",
-               post(create_locker).delete(delete_locker).get(read_locker))
+               post(create_locker).delete(delete_locker)
+               .put(update_locker).get(read_locker))
         // Add middleware to all routes
         .layer(
             ServiceBuilder::new()
@@ -59,7 +58,7 @@ pub async fn server(store: Arc<dyn KVStore + Send + Sync>,
         .with_state(store);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
-    // tracing::debug!("listening on {}", addr);
+    tracing::debug!("listening on {}", addr);
     axum::Server::bind(&addr)
         .serve(app.into_make_service()).
         await.unwrap();
@@ -140,15 +139,33 @@ async fn create_locker(State(store): State<Store>, Json(input): Json<Locker>)
         },
     }
 }
-async fn delete_locker(State(store): State<Store>, Json(input): Json<LockerId>)
+
+async fn update_locker(State(store): State<Store>, Json(input): Json<Locker>)
     -> impl IntoResponse
 {
-    // TODO: Use deferred removal scheme for deleting lockers.
     if let Err(e) = check_context(&store, &input.context) {
         println!("Request context check failed, err: {:?}", e);
         return StatusCode::FORBIDDEN;
     }
-    match store.remove_kv(&input.context.vault_id, &input.locker_id) {
+    match store.update_kv(&input.context.vault_id,
+                          &input.locker_id, input.locker_contents) {
+        Ok(_) => StatusCode::OK,
+        Err(e) => {
+            println!("Failed to create locker, err: {:?}", e);
+            StatusCode::FOUND
+        },
+    }
+}
+
+async fn delete_locker(State(store): State<Store>, Json(input): Json<LockerId>)
+    -> impl IntoResponse
+{
+    if let Err(e) = check_context(&store, &input.context) {
+        println!("Request context check failed, err: {:?}", e);
+        return StatusCode::FORBIDDEN;
+    }
+    match store.initiate_kv_removal(
+        &input.context.vault_id, &input.locker_id) {
         Ok(_) => StatusCode::NO_CONTENT,
         Err(e) => {
             println!("Failed to delete locker, err: {:?}", e);

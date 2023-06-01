@@ -7,6 +7,7 @@ use crate::secret_vault::{CommonContext,
     GetConfigRequest, GetConfigResponse,
     CreateLockerRequest, CreateLockerResponse,
     ReadLockerRequest, ReadLockerResponse,
+    UpdateLockerRequest, UpdateLockerResponse,
     InitiateLockerDeletionRequest, InitiateLockerDeletionResponse,
     secret_vault_server::{SecretVault},
 };
@@ -51,6 +52,13 @@ impl SecretVaultService
                             "Vault {} not found", &ctx.vault_id)))
         }
     }
+
+    pub fn intercept_for_auth(req: Request<()>)
+        -> Result<Request<()>, Status>
+    {
+            println!("Intercepted request: {:?}", req);
+            Ok(req)
+    }
 }
 
 #[tonic::async_trait]
@@ -88,8 +96,8 @@ impl SecretVault for SecretVaultService
         }
     }
 
-    async fn initiate_locker_deletion(&self, req: Request<InitiateLockerDeletionRequest>)
-        -> Result<Response<InitiateLockerDeletionResponse>, Status>
+    async fn update_locker(&self, req: Request<UpdateLockerRequest>)
+        -> Result<Response<UpdateLockerResponse>, Status>
     {
         let req = req.into_inner();
         let Some(ctx) = req.context else {
@@ -99,9 +107,9 @@ impl SecretVault for SecretVaultService
         if let Err(e) = self.check_context(&ctx) {
             return Err(e);
         }
-        match self.lockers.initiate_kv_removal(
-            &ctx.vault_id, &req.locker_id) {
-            Ok(_) =>  Ok(Response::new(InitiateLockerDeletionResponse{})),
+        match self.lockers.update_kv(
+            &ctx.vault_id, &req.locker_id, req.locker_contents) {
+            Ok(_) => Ok(Response::new(UpdateLockerResponse {})),
             Err(e) => Err(Status::new(tonic::Code::NotFound,
                     std::format!("Err: {}", e))),
         }
@@ -122,6 +130,25 @@ impl SecretVault for SecretVaultService
             Ok(contents) => Ok(Response::new(ReadLockerResponse {
                 locker_contents: contents,
             })),
+            Err(e) => Err(Status::new(tonic::Code::NotFound,
+                    std::format!("Err: {}", e))),
+        }
+    }
+
+    async fn initiate_locker_deletion(&self, req: Request<InitiateLockerDeletionRequest>)
+        -> Result<Response<InitiateLockerDeletionResponse>, Status>
+    {
+        let req = req.into_inner();
+        let Some(ctx) = req.context else {
+            return Err(Status::new(tonic::Code::InvalidArgument,
+                        "Failed to extract vault context from request"));
+        };
+        if let Err(e) = self.check_context(&ctx) {
+            return Err(e);
+        }
+        match self.lockers.initiate_kv_removal(
+            &ctx.vault_id, &req.locker_id) {
+            Ok(_) =>  Ok(Response::new(InitiateLockerDeletionResponse{})),
             Err(e) => Err(Status::new(tonic::Code::NotFound,
                     std::format!("Err: {}", e))),
         }

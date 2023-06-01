@@ -3,7 +3,7 @@ use axum::{
     extract::State,
     http::StatusCode,
     response::IntoResponse,
-    routing::{post, get},
+    routing::{post, get, delete},
     Json, Router,
 };
 use serde::{Deserialize, Serialize};
@@ -40,6 +40,8 @@ pub async fn server(store: Arc<dyn KVStore + Send + Sync>,
         .route("/vault", post(create_vault).delete(delete_vault))
         .route("/metadata", post(add_metadata).delete(remove_metadata)
                .put(update_metadata).get(get_metadata))
+        .route("/pending_delete", delete(delete_locker)
+               .put(resuscitate_locker))
         // Add middleware to all routes
         .layer(
             ServiceBuilder::new()
@@ -66,6 +68,8 @@ pub async fn server(store: Arc<dyn KVStore + Send + Sync>,
         await.unwrap();
 }
 
+// --- Handlers for route `admin_config` ---
+
 async fn get_admin_config(State(_): State<Store>)
     -> Result<impl IntoResponse, StatusCode>
 {
@@ -78,11 +82,13 @@ async fn get_admin_config(State(_): State<Store>)
     }
 }
 
+// --- Handlers for route `vault` ---
+
 #[derive(Debug, Deserialize, Default)]
-pub struct LockerId {
+pub struct VaultId {
     pub vault_id: String,
 }
-async fn create_vault(State(store): State<Store>, Json(input): Json<LockerId>)
+async fn create_vault(State(store): State<Store>, Json(input): Json<VaultId>)
     -> impl IntoResponse
 {
     match store.create_db(input.vault_id) {
@@ -93,7 +99,7 @@ async fn create_vault(State(store): State<Store>, Json(input): Json<LockerId>)
         },
     }
 }
-async fn delete_vault(State(store): State<Store>, Json(input): Json<LockerId>)
+async fn delete_vault(State(store): State<Store>, Json(input): Json<VaultId>)
     -> impl IntoResponse
 {
     match store.delete_db(&input.vault_id) {
@@ -104,6 +110,8 @@ async fn delete_vault(State(store): State<Store>, Json(input): Json<LockerId>)
         },
     }
 }
+
+// --- Handlers for route `metadata` ---
 
 #[derive(Debug, Serialize, Deserialize, Default)]
 pub struct Metadata {
@@ -167,4 +175,36 @@ async fn get_metadata(State(store): State<Store>, Json(input): Json<MetadataKey>
     }
     println!("Failed to find secret, err: {:?}", res);
     Err(StatusCode::NOT_FOUND)
+}
+
+// --- Handlers for route `pending_delete` ---
+
+#[derive(Debug, Deserialize, Default)]
+pub struct LockerId {
+    pub vault_id: String,
+    pub locker_id: String,
+}
+
+async fn delete_locker(State(store): State<Store>, Json(input): Json<LockerId>)
+    -> impl IntoResponse
+{
+    match store.complete_kv_removal(&input.vault_id, &input.locker_id) {
+        Ok(_) => StatusCode::NO_CONTENT,
+        Err(e) => {
+            println!("Failed to delete secret, err: {:?}", e);
+            StatusCode::NOT_FOUND
+        },
+    }
+}
+
+async fn resuscitate_locker(State(store): State<Store>, Json(input): Json<LockerId>)
+    -> impl IntoResponse
+{
+    match store.cancel_kv_removal(&input.vault_id, &input.locker_id) {
+        Ok(_) => StatusCode::NO_CONTENT,
+        Err(e) => {
+            println!("Failed to delete secret, err: {:?}", e);
+            StatusCode::NOT_FOUND
+        },
+    }
 }

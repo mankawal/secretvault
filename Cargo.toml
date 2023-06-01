@@ -6,17 +6,20 @@ edition = "2021"
 [dependencies]
 axum = "0.6.12"
 log = "0.4.17"
+openssl = {version = "0.10.52", features = ["vendored"]}
 prost = "0.11.8"
 quote = "1.0.26"
-rocksdb = { version = "0.20.1", features = ["multi-threaded-cf"] }
-serde = { version = "1.0", features  = ["derive"] }
+rocksdb = {version = "0.20.1", features = ["multi-threaded-cf"]}
+serde = {version = "1.0", features  = ["derive"]}
 serde_derive = "1.0.159"
 serde_json = "1.0.94"
 tokio = {version = "1.27.0", features = ["full"]}
 tokio-rustls = "0.23.4"
-tonic = { version = "0.8.3", features = ["transport", "tls"] }
+tonic = {version = "0.8.3", features = ["transport", "tls"]}
 tower = "0.4.13"
 tower-http = {version = "0.4.0", features = ["trace"]}
+tracing = "0.1.37"
+tracing-subscriber = {version = "0.3.17", features = ["env-filter", "tracing"]}
 
 [build-dependencies]
 tonic-build = "0.8.4"

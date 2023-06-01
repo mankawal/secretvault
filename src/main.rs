@@ -94,7 +94,8 @@ async fn run_vault_svc(kvstore: Arc<dyn KVStore + Send + Sync>)
             .await.unwrap();
     } else {
         Server::builder()
-            .add_service(SecretVaultServer::new(service))
+            .add_service(SecretVaultServer::with_interceptor(
+                    service, svc_grpc::SecretVaultService::intercept_for_auth))
             .serve(service_addr)
             .await.unwrap();
     }
