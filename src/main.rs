@@ -1,6 +1,7 @@
 use std::{env,sync::Arc};
 use tonic::transport::{Identity, Server, ServerTlsConfig};
 
+mod auth_token;
 mod prelude;
 mod config;
 mod store_factory;
@@ -31,6 +32,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>>
         tests::test_client_workflow(&config).await;
         return Ok(());
     }
+
+    auth_token::init().unwrap();
 
     let mut svc_thds = Vec::new();
     let kvstore = store_factory::create_store(&config).unwrap();
@@ -94,8 +97,11 @@ async fn run_vault_svc(kvstore: Arc<dyn KVStore + Send + Sync>)
             .await.unwrap();
     } else {
         Server::builder()
+            /*
             .add_service(SecretVaultServer::with_interceptor(
                     service, svc_grpc::SecretVaultService::intercept_for_auth))
+            */
+            .add_service(SecretVaultServer::new(service))
             .serve(service_addr)
             .await.unwrap();
     }
