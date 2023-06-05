@@ -6,7 +6,6 @@ use pasetors::token::UntrustedToken;
 use core::convert::TryFrom;
 use once_cell::sync::Lazy;
 
-use crate::secret_vault::CommonContext;
 
 static TOKEN_KEY: Lazy<Result<SymmetricKey<V4>, Error>> = Lazy::new(|| {
     println!("Generating new token");
@@ -21,7 +20,9 @@ pub fn init() -> Result<(), &'static Error>
     }
 }
 
-pub fn generate_token(ctx: &CommonContext) -> Result<String, Error>
+pub fn generate_token(
+    vault_id: &str, user_name: &str,user_context: &str
+    ) -> Result<String, Error>
 {
     let Ok(key) = TOKEN_KEY.as_ref() else {
         panic!("Token key uninitialized, module init not invoked!");
@@ -29,17 +30,17 @@ pub fn generate_token(ctx: &CommonContext) -> Result<String, Error>
 
     let mut claims = Claims::new()?;
     claims.non_expiring();
-    claims.add_additional("vault_id", ctx.vault_id.to_string())?;
-    claims.add_additional("user_name", ctx.user_name.to_string())?;
-    claims.add_additional("user_context", ctx.user_context.to_string())?;
-    println!("claims: {:?}", &claims);
+    claims.add_additional("vault_id", vault_id.to_string())?;
+    claims.add_additional("user_name", user_name.to_string())?;
+    claims.add_additional("user_context", user_context.to_string())?;
 
-    println!("claims: {:?}", &claims);
+    // println!("claims: {:?}", &claims);
     local::encrypt(&key, &claims, None /* footer */,
                    Some(b"implicit assertion"))
 }
 
-pub fn decode_token(token: &str) -> Result<CommonContext, Error>
+pub fn decode_token(token: &str)
+    -> Result<(String, String, String), Error>
 {
     let Ok(key) = TOKEN_KEY.as_ref() else {
         panic!("Token key uninitialized, module init not invoked!");
@@ -65,7 +66,6 @@ pub fn decode_token(token: &str) -> Result<CommonContext, Error>
         println!("Failed to get vault_id from claims");
         return Err(Error::InvalidClaim);
     };
-    println!("vault_id: {:?}", val);
     let serde_json::Value::String(vault_id) = val else {
         println!("Invalid json value for vault_id in claims");
         return Err(Error::InvalidClaim);
@@ -89,9 +89,6 @@ pub fn decode_token(token: &str) -> Result<CommonContext, Error>
         return Err(Error::InvalidClaim);
     };
 
-    Ok(CommonContext {
-        vault_id: vault_id.to_string(),
-        user_name: user_name.to_string(),
-        user_context: user_context.to_string(),
-    })
+    Ok((vault_id.to_string(), user_name.to_string(),
+        user_context.to_string()))
 }

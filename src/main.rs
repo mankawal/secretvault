@@ -38,24 +38,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>>
     let mut svc_thds = Vec::new();
     let kvstore = store_factory::create_store(&config).unwrap();
 
-    let kvstore_admin_grpc = kvstore.clone();
     if config.serve_admin.proto.grpc != 0
     {
+        let kvstore_admin_grpc = kvstore.clone();
         svc_thds.push(tokio::spawn(async move {
             run_vault_admin_svc(kvstore_admin_grpc).await;
         }));
     }
-    let kvstore_grpc = kvstore.clone();
     if config.serve.proto.grpc != 0
     {
+        let kvstore_grpc = kvstore.clone();
         svc_thds.push(tokio::spawn(async move {
             run_vault_svc(kvstore_grpc).await;
         }));
     }
 
-    let kvstore_admin_rest = kvstore.clone();
-    if config.serve.proto.rest != 0
+    if config.serve_admin.proto.rest != 0
     {
+        let kvstore_admin_rest = kvstore.clone();
         svc_thds.push(tokio::spawn(async move {
             svc_rest_admin::server(kvstore_admin_rest,
                                    config.serve_admin.proto.rest,

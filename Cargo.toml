@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 axum = "0.6.12"
+axum-macros = "0.3.7"
 log = "0.4.17"
 once_cell = "1.17.2"
 openssl = {version = "0.10.52", features = ["vendored"]}

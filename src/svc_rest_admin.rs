@@ -14,7 +14,6 @@ use std::{
 };
 use tower::{BoxError, ServiceBuilder};
 use tower_http::trace::TraceLayer;
-// use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use crate::config;
 use crate::prelude::KVStore;
@@ -24,16 +23,6 @@ type Store = Arc<dyn KVStore + Send + Sync>;
 pub async fn server(store: Arc<dyn KVStore + Send + Sync>,
                     port: u16, _tls: bool)
 {
-    /*
-       tracing_subscriber::registry()
-       .with(
-       tracing_subscriber::EnvFilter::try_from_default_env()
-       .unwrap_or_else(|_| "example_todos=debug,tower_http=debug".into()),
-       )
-       .with(tracing_subscriber::fmt::layer())
-       .init();
-       */
-
     // Compose the routes
     let app = Router::new()
         .route("/admin_config", get(get_admin_config))
@@ -62,7 +51,6 @@ pub async fn server(store: Arc<dyn KVStore + Send + Sync>,
         .with_state(store);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
-    // tracing::debug!("listening on {}", addr);
     axum::Server::bind(&addr)
         .serve(app.into_make_service()).
         await.unwrap();
@@ -133,7 +121,7 @@ async fn add_metadata(State(store): State<Store>, Json(input): Json<Metadata>)
                        input.name, input.value) {
         Ok(_) => StatusCode::CREATED,
         Err(e) => {
-            println!("Failed to create secret, err: {:?}", e);
+            println!("Failed to create locker, err: {:?}", e);
             StatusCode::FOUND
         },
     }
@@ -144,7 +132,7 @@ async fn remove_metadata(State(store): State<Store>, Json(input): Json<MetadataK
     match store.remove_kv(&input.vault_id, &input.name) {
         Ok(_) => StatusCode::NO_CONTENT,
         Err(e) => {
-            println!("Failed to delete secret, err: {:?}", e);
+            println!("Failed to delete locker, err: {:?}", e);
             StatusCode::NOT_FOUND
         },
     }
@@ -156,7 +144,7 @@ async fn update_metadata(State(store): State<Store>, Json(input): Json<Metadata>
                           &input.name, input.value) {
         Ok(_) => StatusCode::OK,
         Err(e) => {
-            println!("Failed to update secret, err: {:?}", e);
+            println!("Failed to update locker, err: {:?}", e);
             StatusCode::NOT_FOUND
         },
     }
@@ -164,17 +152,21 @@ async fn update_metadata(State(store): State<Store>, Json(input): Json<Metadata>
 async fn get_metadata(State(store): State<Store>, Json(input): Json<MetadataKey>)
     -> Result<impl IntoResponse, StatusCode>
 {
-    let res = store.get_kv(&input.vault_id, &input.name);
-    if let Ok(blob) = res {
-        let secret = Metadata {
-            vault_id: input.vault_id,
-            name: input.name,
-            value: blob
-        };
-        return Ok(Json(secret));
+    match store.get_kv(&input.vault_id, &input.name)
+    {
+        Ok(blob) => {
+            let locker = Metadata {
+                vault_id: input.vault_id,
+                name: input.name,
+                value: blob
+            };
+            Ok(Json(locker))
+        },
+        Err(e) => {
+            println!("Failed to find locker, err: {:?}", e);
+            Err(StatusCode::NOT_FOUND)
+        }
     }
-    println!("Failed to find secret, err: {:?}", res);
-    Err(StatusCode::NOT_FOUND)
 }
 
 // --- Handlers for route `pending_delete` ---
@@ -188,10 +180,14 @@ pub struct LockerId {
 async fn delete_locker(State(store): State<Store>, Json(input): Json<LockerId>)
     -> impl IntoResponse
 {
+    /*
+    println!("Trying to complete delete action on locker: {} in vault: {}",
+             &input.locker_id, &input.vault_id);
+    */
     match store.complete_kv_removal(&input.vault_id, &input.locker_id) {
         Ok(_) => StatusCode::NO_CONTENT,
         Err(e) => {
-            println!("Failed to delete secret, err: {:?}", e);
+            println!("Failed to delete locker, err: {:?}", e);
             StatusCode::NOT_FOUND
         },
     }
@@ -203,7 +199,7 @@ async fn resuscitate_locker(State(store): State<Store>, Json(input): Json<Locker
     match store.cancel_kv_removal(&input.vault_id, &input.locker_id) {
         Ok(_) => StatusCode::NO_CONTENT,
         Err(e) => {
-            println!("Failed to delete secret, err: {:?}", e);
+            println!("Failed to delete locker, err: {:?}", e);
             StatusCode::NOT_FOUND
         },
     }

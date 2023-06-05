@@ -16,7 +16,6 @@ use crate::secret_vault::{CommonContext,
     secret_vault_server::{SecretVault},
 };
 use crate::config::ServiceConfig;
-
 use crate::auth_token;
 
 pub struct SecretVaultService
@@ -35,7 +34,7 @@ impl SecretVaultService
         })
     }
 
-    pub fn validate_context_in_kvstore(&self, ctx: &CommonContext) ->
+    fn validate_context_in_kvstore(&self, ctx: &CommonContext) ->
         Result<(), Status>
     {
         match self.lockers.get_kv(&ctx.vault_id, &ctx.user_name) {
@@ -54,7 +53,7 @@ impl SecretVaultService
         }
     }
 
-    pub fn check_context(&self, ctx: Option<CommonContext>) ->
+    fn check_context(&self, ctx: Option<CommonContext>) ->
         Result<CommonContext, Status>
     {
         let Some(ctx) = ctx else {
@@ -67,7 +66,7 @@ impl SecretVaultService
         }
     }
 
-    pub fn compare_and_check_context(&self, ctx: Option<CommonContext>,
+    fn compare_and_check_context(&self, ctx: Option<CommonContext>,
                                      ctx_in_token: &CommonContext) ->
         Result<CommonContext, Status>
     {
@@ -102,11 +101,14 @@ impl SecretVaultService
                         "Null/invalid bearer token in Authorization header"));
         }
         match auth_token::decode_token(&words[1]) {
-            Ok(ctx_in_token) => {
+            Ok((vault, user, userctx)) => {
                 println!("vault: {}, user: {}, user_ctx: {}",
-                         &ctx_in_token.vault_id, &ctx_in_token.user_name,
-                         &ctx_in_token.user_context);
-                Ok(ctx_in_token)
+                         &vault, &user, &userctx);
+                Ok(CommonContext {
+                    vault_id: vault,
+                    user_name: user,
+                    user_context: userctx,
+                })
             },
             Err(e) => Err(Status::new(
                     tonic::Code::Unauthenticated, std::format!(
@@ -198,7 +200,8 @@ impl SecretVault for SecretVaultService
     {
         let inreq = req.into_inner();
         let ctx = self.check_context(inreq.context)?;
-        match auth_token::generate_token(&ctx) {
+        match auth_token::generate_token(
+                &ctx.vault_id, &ctx.user_name, &ctx.user_context) {
             Ok(token) => Ok(Response::new(GetAuthResponse{
                 auth_token: token,
             })),
