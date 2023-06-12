@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta http-equiv="content-type" content="text/html; charset=utf-8"/>
+	<title></title>
+	<meta name="generator" content="LibreOffice 7.3.7.2 (Linux)"/>
+	<meta name="created" content="2023-06-11T14:17:57.978261328"/>
+	<meta name="changed" content="2023-06-12T00:09:43.481450647"/>
+	<style type="text/css">
+		@page { size: 21cm 29.7cm; margin: 2cm }
+		p { line-height: 115%; margin-bottom: 0.25cm; background: transparent }
+		p.western { font-family: "Roboto" }
+		a:link { color: #000080; text-decoration: underline }
+		a:visited { color: #800000; text-decoration: underline }
+	</style>
+</head>
+<body lang="sl-SI" link="#000080" vlink="#800000" dir="ltr"><p align="center" style="line-height: 100%; margin-top: 0.42cm; margin-bottom: 0.21cm; page-break-after: avoid">
+<font face="Liberation Sans, sans-serif"><font size="6" style="font-size: 28pt"><b>Managing
+passwords</b></font></font></p>
+<p align="center" style="line-height: 100%; margin-top: 0.11cm; margin-bottom: 0.21cm; page-break-after: avoid">
+<font face="Liberation Sans, sans-serif"><font size="5" style="font-size: 18pt"><a href="https://xkcd.com/936/">Correct
+Horse Battery Staple</a> no more!</font></font></p>
+<p style="font-weight: normal; line-height: 100%; margin-top: 0.2cm; margin-bottom: 0.2cm; border-top: none; border-bottom: 3.00pt solid #000000; border-left: none; border-right: none; padding-top: 0cm; padding-bottom: 0.1cm; padding-left: 0cm; padding-right: 0cm; page-break-before: auto">
+<font face="Roboto Black">Abstract</font></p>
+<p class="western">Passwords are the keystone of our digital world.
+As ubiquitous they are, passwords are, in most cases, the only line
+of defence for our digital identities and  assets against the prying
+eyes of malicious actors. This paper presents a novel implementation
+of password management that allows single users as well as
+enterprises to better manage the lifetime of passwords and devise
+sophisticated yet simple-to-deploy mechanisms to identify and rectify
+broken passwords.</p>
+<p style="font-weight: normal; line-height: 100%; margin-top: 0.2cm; margin-bottom: 0.2cm; border-top: none; border-bottom: 3.00pt solid #000000; border-left: none; border-right: none; padding-top: 0cm; padding-bottom: 0.1cm; padding-left: 0cm; padding-right: 0cm; page-break-before: auto">
+<font face="Roboto Black">Keywords</font></p>
+<p class="western">Password manager, Digital Keychain, Self hosted,
+Open source.</p>
+<p style="font-weight: normal; line-height: 100%; margin-top: 0.2cm; margin-bottom: 0.2cm; border-top: none; border-bottom: 3.00pt solid #000000; border-left: none; border-right: none; padding-top: 0cm; padding-bottom: 0.1cm; padding-left: 0cm; padding-right: 0cm; page-break-before: auto">
+<font face="Roboto Black">Why another password manager?</font></p>
+<p class="western">Unfortunately, the outsourcing mindset to password
+management has proven to be a recipe for disaster. Here’s a <a href="https://password-managers.bestreviews.net/faq/which-password-managers-have-been-hacked/">list
+of password manager that have been hacked since 2014</a>, opening
+doors to large blast radius privacy breaches.<br/>
+Some common
+elements in most of these attacks are</p>
+<p class="western">proprietary code-bases used to create siloed
+solutions</p>
+<p class="western">dated encryption mechanisms and 
+</p>
+<p class="western">long reaction time to update and patch the
+software in face of zero day attacks. Clearly, the ownership of the
+digital keys must lie with the parties most affected by their
+theft.<br/>
+In its document <a href="https://cloud.google.com/solutions/modern-password-security-for-users.pdf">’Modern
+password security for users’</a>, Google lists out the following
+key guidelines for a password manager:</p>
+<ul>
+	<li><p class="western">Encrypt the data, at rest or in transit.</p>
+	<li><p class="western">Revocable recovery keys that may be stored
+	offline.</p>
+	<li><p class="western">Multi-factory authentation (no SMSs).</p>
+	<li><p class="western">Self-hosted, open source.</p>
+	<li><p class="western">Password manager must not attempt to provide
+	recovery mechanisms.</p>
+	<li><p class="western">Self-locking database access.</p>
+	<li><p class="western">Zero-trust built into the design.</p>
+</ul>
+<p class="western">The &lt;pass_mgr_name&gt; password manager aims at
+providing all of the above features in an accessible yet foolproof
+manner.</p>
+<p class="western"><br/>
+<br/>
+
+</p>
+<p style="font-weight: normal; line-height: 100%; margin-top: 0.2cm; margin-bottom: 0.2cm; border-top: none; border-bottom: 3.00pt solid #000000; border-left: none; border-right: none; padding-top: 0cm; padding-bottom: 0.1cm; padding-left: 0cm; padding-right: 0cm; page-break-before: auto">
+<font face="Roboto Black">Under the hood</font></p>
+<p class="western">The &lt;pass_mgr_name&gt; consists of two
+components – a chrome extension front end and an encrypted storage
+backend service. The backend service can be thought of as an
+persisted hashmap. The front-end manages the following aspects:</p>
+<ul>
+	<li><p class="western">User profiles</p>
+	<li><p class="western">Per-user secrets’ vault.</p>
+	<li><p class="western">Miscellaneous administrative operations.</p>
+</ul>
+<p class="western">&lt;pass_mgr_name&gt; distinguishes between the
+administrator and user personas explicitly, even for a single user.
+These two user personas govern the allowed storage accesses; an
+administrator may create new users and their vaults, whereas a user
+may only store secrets under its assigned vault. While the backend
+verifies the user identify for each access to the secrets in a vault,
+it does not hold any data that may tie a user to its vault; only the
+frontend is privy to that info. This design tenet ensures that a
+user’s secrets cannot be linked to the user if the storage backend
+is breached. 
+</p>
+<p class="western">The central entity of &lt;pass_mgr_name&gt; is a
+secrets’ vault that allows users to stores their passwords or any
+other secrets for any website (domain) securely and provide
+auto-filling function when visiting these websites, given that the
+user has authenticated itself by providing a master password. In
+addition to this master password, the front-end also maintains a
+secrets’ encryption key on the user’s machine. This secret key,
+along with the backend service’s endpoint URL and the vault’s
+storage identifier, is encrypted with the master password before
+storing it on the user’s host. The vault’s storage identifier is
+a SHA-512 hash of a human readable vault name string known to both
+the administrator and the users.<br/>
+&lt;Verify below
+statement&gt;<br/>
+Note that while the administrator knows the master
+password for the vault, only the user persona knows about the
+secrets’ encryption key. This allows the users’ information
+within the vault to be secured from administrator persona as well.
+<br/>
+The front-end uses the backend’s key-value store to store
+multiple data elements of the vault, namely:</p>
+<ul>
+	<li><p class="western">Vault metadata<br/>
+In the backend storage,
+	each vault-id is expressed as SHA512 hash of a front-end visible
+	string used as the key and the list of domain identifiers for which
+	the users have stored their passwords or other secrets as further
+	key-value pairs within the logical context of this vault. The
+	notional domain identifier are computes as SHA-512 hash of vault’s
+	storage identifier, plain-text website/domain name and the
+	master-password. This metadata is created by the administrator at
+	provisioning stage and populated with notional domain-ids by the
+	users when adding their own secrets to the vault.</p>
+	<li><p class="western">Users in a vault and their attributes.<br/>
+The
+	user’s name is used as the key. &lt;What is the user attribute?&gt;.
+	This key-value pair is generated by the administrator at
+	provisioning stage.<br/>
+Each user must obtain a session token from
+	the backend before accessing the secrets in their vault by
+	presenting their user name and attributes. The backend verifies this
+	information against the user’s key-value entry in it storage to
+	generate a PASETO session token and sends it back to user. The user
+	must present this session token for each access to the vault.</p>
+	<li><p class="western">Users’ secrets<br/>
+The front-end stores
+	the user’s secrets for each website/domain after encrypting it
+	with both the master password and the user’s secrets’ encryption
+	key as a value blob againt the domain identifier of their
+	corresponding domain/website, as listed under vault’s metadata.
+	These secrets must be recreated whenever their user’s secrets’
+	encryption key is rotated.</p>
+</ul>
+<p class="western">The design ensures that the user’s secrets are
+encrypted both in transit and at rest within the backend storage.
+These secrets can be made inaccessible either by the administrator,
+by changing the master password, or by the user, by changing their
+secret’s encryption key. &lt;pass_mgr_name&gt; does not implement
+any recovery mechanism for secrets rendered inaccessible.<br/>
+<br/>
+The
+backend implements a deferred deletion scheme for preventing
+accidental deletion of users’ secret. A user’s request for
+deletion of a secret must be approved by the administrator for the
+storage record to be deleted. The administrator may choose to
+resuscitate a secret in deferred-deleted state to rollback any
+deletions made in error.</p>
+<p style="font-weight: normal; line-height: 100%; margin-top: 0.2cm; margin-bottom: 0.2cm; border-top: none; border-bottom: 3.00pt solid #000000; border-left: none; border-right: none; padding-top: 0cm; padding-bottom: 0.1cm; padding-left: 0cm; padding-right: 0cm; page-break-before: auto">
+<font face="Roboto Black">Available Integrations and compatibility</font></p>
+<p class="western">&lt;pass_mgr_name&gt; is availalble as chrome
+extension and the backend is available as Rust microservice. &lt;github
+links&gt;</p>
+<p style="font-weight: normal; line-height: 100%; margin-top: 0.2cm; margin-bottom: 0.2cm; border-top: none; border-bottom: 3.00pt solid #000000; border-left: none; border-right: none; padding-top: 0cm; padding-bottom: 0.1cm; padding-left: 0cm; padding-right: 0cm; page-break-before: auto">
+<font face="Roboto Black"><strike>If </strike>When things break: Cost
+to attacker &amp; price of recovery</font></p>
+<p class="western">Implementation details.</p>
+</body>
+</html>
